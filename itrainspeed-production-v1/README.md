@@ -1,25 +1,14 @@
-# iTrainSpeed Production V1
+# iTrainSpeed Production V1.1
 
-Production Next.js foundation for iTrainSpeed booking.
+Adds the complete booking lifecycle test features:
 
-## Deploy to Vercel
-1. Replace the old GitHub repository contents with this project's contents (do not upload the zip itself).
-2. In Vercel Project Settings > Environment Variables add:
-   - NEXT_PUBLIC_SUPABASE_URL
-   - NEXT_PUBLIC_SUPABASE_ANON_KEY
-3. Redeploy. Vercel should detect Next.js automatically.
-4. In Supabase SQL Editor run `supabase/production-migration.sql` once after the earlier Booking V2 schema.
-5. Open the deployed app and create your own account.
-6. In Supabase SQL Editor run the final commented `update profiles...` statement with your email to promote your account to admin.
-7. Sign out/in again. Coach Control Center will be available.
+- Parent cancellation from Home
+- Automatic credit restoration using the existing `cancel_booking` RPC
+- Coach session cards open a live athlete roster
+- Safe, rerunnable Supabase upgrade in `supabase/v1-1-safe-upgrade.sql`
 
-## First end-to-end test
-- Admin: create a future session in Coach.
-- Parent test account: add an athlete, then book that session.
-- Verify the booking count increases in Coach.
-
-## Security
-Never commit a Supabase service-role key or Stripe secret key to GitHub. The public anon/publishable key is used client-side with RLS enabled.
-
-## Next milestone
-Stripe Checkout + webhook-backed package credits, cancellation window, waitlist, attendance roster, recurring sessions, and performance entry.
+## Upgrade from Production V1
+1. Run `supabase/v1-1-safe-upgrade.sql` in Supabase SQL Editor.
+2. Replace the contents of the existing GitHub `itrainspeed-production-v1` folder with this package's contents.
+3. Commit to `main`. Vercel will redeploy automatically.
+4. Test: Home -> Cancel -> confirm credit restored and coach count decrements; Coach -> session -> roster.
