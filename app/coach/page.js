@@ -1,4 +1,3 @@
-\
 'use client'
 import {useEffect,useState} from 'react';import AppShell from '../../components/AppShell';import {supabase} from '../../lib/supabase'
 const blankProgram={name:'',category:'Speed & Agility',min_age:6,max_age:18,credit_cost:1,price_cents:4000,active:true}
