@@ -1,21 +1,23 @@
-# iTrainSpeed Production V1.1
+# iTrainSpeed Production V1.4 — Packages & Entitlements
 
-Adds the complete booking lifecycle test features:
+Builds on the verified V1.3 booking platform.
 
-- Parent cancellation from Home
-- Automatic credit restoration using the existing `cancel_booking` RPC
-- Coach session cards open a live athlete roster
-- Safe, rerunnable Supabase upgrade in `supabase/v1-1-safe-upgrade.sql`
+## New in V1.4
+- Admin-managed package catalog seeded with current iTrainSpeed pricing
+- Typed access: group, private, track, recovery
+- Credits, memberships, and promotions
+- Founding Athlete promo ($175, first 10 model prepared)
+- Off-Season Track & Field membership ($175/month, athlete-specific)
+- Admin test grants so entitlement logic can be tested before Stripe
+- Booking now consumes the correct entitlement type and cancellation restores typed credits
+- Plans tab for parents/admins
 
-## Upgrade from Production V1
-1. Run `supabase/v1-1-safe-upgrade.sql` in Supabase SQL Editor.
-2. Replace the contents of the existing GitHub `itrainspeed-production-v1` folder with this package's contents.
-3. Commit to `main`. Vercel will redeploy automatically.
-4. Test: Home -> Cancel -> confirm credit restored and coach count decrements; Coach -> session -> roster.
+## Upgrade
+1. Run `supabase/v1-4-safe-upgrade.sql` in Supabase SQL Editor.
+2. Replace the GitHub repository root with this build and commit.
+3. Let Vercel deploy Production.
+4. Open Plans as Admin and grant a Group package to your test account.
+5. Book an eligible Speed & Agility session; verify the typed credit decrements.
+6. Cancel; verify the typed credit returns.
 
-## V1.2 upgrade
-Run `supabase/v1-2-safe-upgrade.sql` once in the existing Supabase project. It replaces only the `book_session` RPC so a cancelled athlete/session booking is reactivated instead of inserting a duplicate row. It preserves the existing unique constraint and booking history.
-
-
-## Production V1.3
-Adds in-app Program Management, weekly recurring session publishing, safe coach/admin session cancellation with automatic credit refunds, and booked-state protection on the booking screen. Run `supabase/v1-3-safe-upgrade.sql` once before using program edits or session cancellation.
+Do not connect Stripe keys yet. Stripe test-mode checkout is the next phase after this logic passes.
