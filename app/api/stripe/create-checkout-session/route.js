@@ -161,6 +161,13 @@ export async function POST(request) {
           'membership'
       )
 
+    /*
+     * Keep the athlete record available so
+     * athlete-specific Stripe subscriptions
+     * can carry the athlete's identity.
+     */
+    let selectedAthlete = null
+
     if (requiresAthlete) {
       if (!athleteId) {
         return Response.json(
@@ -177,7 +184,9 @@ export async function POST(request) {
         error: athleteError,
       } = await supabaseAdmin
         .from('athletes')
-        .select('id, guardian_id')
+        .select(
+          'id, guardian_id, first_name, last_name'
+        )
         .eq('id', athleteId)
         .eq('guardian_id', user.id)
         .single()
@@ -194,12 +203,25 @@ export async function POST(request) {
           { status: 403 }
         )
       }
+
+      selectedAthlete = athlete
     }
 
     const entitlementAthleteId =
       requiresAthlete
         ? athleteId
         : null
+
+    const athleteName =
+      selectedAthlete
+        ? [
+            selectedAthlete.first_name,
+            selectedAthlete.last_name,
+          ]
+            .filter(Boolean)
+            .join(' ')
+            .trim()
+        : ''
 
     /*
      * DUPLICATE ATHLETE MEMBERSHIP PROTECTION
@@ -468,6 +490,11 @@ export async function POST(request) {
      * Metadata follows the purchase through
      * Stripe and lets the webhook create the
      * correct entitlement.
+     *
+     * Athlete-specific subscriptions also
+     * carry athlete_name so iTrainSpeed can
+     * identify the correct athlete when
+     * managing billing.
      */
     const metadata = {
       package_id:
@@ -485,8 +512,19 @@ export async function POST(request) {
               entitlementAthleteId
             )
           : '',
+
+      athlete_name:
+        athleteName || '',
     }
 
+    /*
+     * Keep the underlying package/product
+     * name unchanged.
+     *
+     * The athlete identity belongs to the
+     * individual subscription, not to the
+     * shared iTrainSpeed package.
+     */
     const priceData = {
       currency: 'usd',
 
@@ -544,6 +582,20 @@ export async function POST(request) {
           ? {
               subscription_data: {
                 metadata,
+
+                /*
+                 * This description is attached
+                 * to the individual subscription.
+                 *
+                 * It gives us a human-readable
+                 * athlete identifier in Stripe
+                 * without renaming the shared
+                 * product.
+                 */
+                description:
+                  athleteName
+                    ? `${packageData.name} — ${athleteName}`
+                    : packageData.name,
               },
             }
           : {
