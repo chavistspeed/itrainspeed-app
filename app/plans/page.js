@@ -43,11 +43,15 @@ function PlansContent() {
   const [profile, setProfile] = useState(null)
 
   const [msg, setMsg] = useState('')
+
   const [selectedAthlete, setSelectedAthlete] =
     useState('')
 
   const [purchasing, setPurchasing] =
     useState(null)
+
+  const [openingPortal, setOpeningPortal] =
+    useState(false)
 
   async function load() {
     const s = supabase()
@@ -95,7 +99,9 @@ function PlansContent() {
 
     setSelectedAthlete(
       (current) =>
-        current || a?.[0]?.id || ''
+        current ||
+        a?.[0]?.id ||
+        ''
     )
   }
 
@@ -112,13 +118,15 @@ function PlansContent() {
         'Payment successful. Your training access is being activated.'
       )
 
-      const timer1 = setTimeout(() => {
-        load()
-      }, 1500)
+      const timer1 =
+        setTimeout(() => {
+          load()
+        }, 1500)
 
-      const timer2 = setTimeout(() => {
-        load()
-      }, 4000)
+      const timer2 =
+        setTimeout(() => {
+          load()
+        }, 4000)
 
       return () => {
         clearTimeout(timer1)
@@ -132,6 +140,12 @@ function PlansContent() {
       )
     }
   }, [searchParams])
+
+  /*
+   * -------------------------------------------------------
+   * STRIPE CHECKOUT
+   * -------------------------------------------------------
+   */
 
   async function purchase(p) {
     setMsg('')
@@ -159,11 +173,9 @@ function PlansContent() {
       } = await s.auth.getSession()
 
       if (!session?.access_token) {
-        setMsg(
+        throw new Error(
           'Please sign in again before purchasing.'
         )
-        setPurchasing(null)
-        return
       }
 
       const response = await fetch(
@@ -190,7 +202,8 @@ function PlansContent() {
         }
       )
 
-      const result = await response.json()
+      const result =
+        await response.json()
 
       if (!response.ok) {
         throw new Error(
@@ -205,7 +218,8 @@ function PlansContent() {
         )
       }
 
-      window.location.href = result.url
+      window.location.href =
+        result.url
     } catch (error) {
       setMsg(
         error?.message ||
@@ -216,8 +230,86 @@ function PlansContent() {
     }
   }
 
+  /*
+   * -------------------------------------------------------
+   * STRIPE CUSTOMER PORTAL
+   * -------------------------------------------------------
+   *
+   * Sends the signed-in guardian to Stripe's hosted
+   * billing portal.
+   *
+   * Stripe handles the sensitive billing interface.
+   * After the parent is finished, Stripe returns them
+   * to /plans.
+   */
+
+  async function openBillingPortal() {
+    setMsg('')
+    setOpeningPortal(true)
+
+    try {
+      const s = supabase()
+
+      const {
+        data: { session },
+      } = await s.auth.getSession()
+
+      if (!session?.access_token) {
+        throw new Error(
+          'Please sign in again before managing your membership.'
+        )
+      }
+
+      const response = await fetch(
+        '/api/stripe/create-portal-session',
+        {
+          method: 'POST',
+
+          headers: {
+            Authorization:
+              `Bearer ${session.access_token}`,
+          },
+        }
+      )
+
+      const result =
+        await response.json()
+
+      if (!response.ok) {
+        throw new Error(
+          result.error ||
+            'Unable to open billing management.'
+        )
+      }
+
+      if (!result.url) {
+        throw new Error(
+          'Stripe did not return a billing portal URL.'
+        )
+      }
+
+      window.location.href =
+        result.url
+    } catch (error) {
+      setMsg(
+        error?.message ||
+          'Unable to open billing management.'
+      )
+
+      setOpeningPortal(false)
+    }
+  }
+
+  /*
+   * -------------------------------------------------------
+   * ADMIN TEST ACCESS
+   * -------------------------------------------------------
+   */
+
   async function grant(p) {
-    if (profile?.role !== 'admin') {
+    if (
+      profile?.role !== 'admin'
+    ) {
       return
     }
 
@@ -241,14 +333,19 @@ function PlansContent() {
       return
     }
 
-    const { error } = await supabase().rpc(
-      'admin_grant_test_package',
-      {
-        p_package_id: p.id,
-        p_guardian_id: profile.id,
-        p_athlete_id: athleteId,
-      }
-    )
+    const { error } =
+      await supabase().rpc(
+        'admin_grant_test_package',
+        {
+          p_package_id: p.id,
+
+          p_guardian_id:
+            profile.id,
+
+          p_athlete_id:
+            athleteId,
+        }
+      )
 
     setMsg(
       error
@@ -256,29 +353,44 @@ function PlansContent() {
         : `Test access granted: ${p.name}`
     )
 
-    if (!error) load()
+    if (!error) {
+      load()
+    }
   }
 
+  /*
+   * -------------------------------------------------------
+   * BOOKING LINKS
+   * -------------------------------------------------------
+   */
+
   function bookUrl(e) {
-    const q = new URLSearchParams({
-      type: e.credit_type,
-      entitlement: e.id,
-    })
+    const q =
+      new URLSearchParams({
+        type: e.credit_type,
+        entitlement: e.id,
+      })
 
     if (e.athlete_id) {
-      q.set('athlete', e.athlete_id)
+      q.set(
+        'athlete',
+        e.athlete_id
+      )
     }
 
     return `/booking?${q.toString()}`
   }
 
   function purchaseButtonText(p) {
-    if (purchasing === p.id) {
+    if (
+      purchasing === p.id
+    ) {
       return 'Opening checkout...'
     }
 
     if (
-      p.payment_type === 'subscription'
+      p.payment_type ===
+      'subscription'
     ) {
       return `Start ${money(
         p.price_cents
@@ -290,6 +402,12 @@ function PlansContent() {
     )}`
   }
 
+  /*
+   * -------------------------------------------------------
+   * PAGE
+   * -------------------------------------------------------
+   */
+
   return (
     <AppShell title="Plans & Packages">
       <div className="pageTitleRow">
@@ -297,18 +415,35 @@ function PlansContent() {
           <h1>My training</h1>
 
           <p className="subtle">
-            Purchase training, manage your
-            available sessions and memberships,
-            and book eligible training.
+            Purchase training, manage
+            your available sessions and
+            memberships, and book
+            eligible training.
           </p>
         </div>
 
-        <Link
-          className="ctaLink"
-          href="/booking"
-        >
-          Book training
-        </Link>
+        <div className="inlineActions">
+          <Link
+            className="ctaLink"
+            href="/booking"
+          >
+            Book training
+          </Link>
+
+          <button
+            className="secondary"
+            onClick={
+              openBillingPortal
+            }
+            disabled={
+              openingPortal
+            }
+          >
+            {openingPortal
+              ? 'Opening billing...'
+              : 'Manage Membership'}
+          </button>
+        </div>
       </div>
 
       {msg && (
@@ -317,24 +452,37 @@ function PlansContent() {
         </div>
       )}
 
-      {profile?.role === 'admin' && (
+      {profile?.role ===
+        'admin' && (
         <div className="notice">
-          <b>Admin test mode:</b>{' '}
-          Customer checkout is now enabled.
-          You can still grant test packages
-          without charging a card.
+          <b>
+            Admin test mode:
+          </b>{' '}
+          Customer checkout is now
+          enabled. You can still grant
+          test packages without charging
+          a card.
         </div>
       )}
 
+      {/*
+       * ---------------------------------------------------
+       * ACTIVE ACCESS
+       * ---------------------------------------------------
+       */}
+
       <section>
-        <h2>Your active access</h2>
+        <h2>
+          Your active access
+        </h2>
 
         {ents.length ? (
           ents.map((e) => {
             const athlete =
               athletes.find(
                 (x) =>
-                  x.id === e.athlete_id
+                  x.id ===
+                  e.athlete_id
               )
 
             return (
@@ -350,7 +498,8 @@ function PlansContent() {
                   </small>
 
                   <h3>
-                    {e.packages?.name ||
+                    {e.packages
+                      ?.name ||
                       label(
                         e.credit_type
                       )}
@@ -385,7 +534,9 @@ function PlansContent() {
                       ? `Valid through ${new Date(
                           e.expires_at
                         ).toLocaleDateString()}`
-                      : 'No expiration'}
+                      : e.stripe_subscription_id
+                        ? 'Active recurring membership'
+                        : 'No expiration'}
                   </span>
                 </div>
 
@@ -409,8 +560,16 @@ function PlansContent() {
         )}
       </section>
 
+      {/*
+       * ---------------------------------------------------
+       * AVAILABLE PLANS
+       * ---------------------------------------------------
+       */}
+
       <section>
-        <h2>Available plans</h2>
+        <h2>
+          Available plans
+        </h2>
 
         {packages.map((p) => {
           const athleteSpecific =
@@ -433,7 +592,9 @@ function PlansContent() {
                   ).toUpperCase()}
                 </small>
 
-                <h3>{p.name}</h3>
+                <h3>
+                  {p.name}
+                </h3>
 
                 {p.description && (
                   <span>
@@ -444,7 +605,9 @@ function PlansContent() {
                 {p.purchase_limit && (
                   <span className="promoText">
                     Limited to the first{' '}
-                    {p.purchase_limit}{' '}
+                    {
+                      p.purchase_limit
+                    }{' '}
                     athletes
                   </span>
                 )}
@@ -453,6 +616,7 @@ function PlansContent() {
                   {money(
                     p.price_cents
                   )}
+
                   {p.payment_type ===
                   'subscription'
                     ? '/month'
@@ -462,6 +626,7 @@ function PlansContent() {
                 {athleteSpecific && (
                   <label>
                     Athlete
+
                     <select
                       value={
                         selectedAthlete
@@ -474,18 +639,29 @@ function PlansContent() {
                       required
                     >
                       {athletes.length ? (
-                        athletes.map((a) => (
-                          <option
-                            key={a.id}
-                            value={a.id}
-                          >
-                            {a.first_name}{' '}
-                            {a.last_name}
-                          </option>
-                        ))
+                        athletes.map(
+                          (a) => (
+                            <option
+                              key={
+                                a.id
+                              }
+                              value={
+                                a.id
+                              }
+                            >
+                              {
+                                a.first_name
+                              }{' '}
+                              {
+                                a.last_name
+                              }
+                            </option>
+                          )
+                        )
                       ) : (
                         <option value="">
-                          Add an athlete first
+                          Add an athlete
+                          first
                         </option>
                       )}
                     </select>
@@ -499,7 +675,8 @@ function PlansContent() {
                     purchase(p)
                   }
                   disabled={
-                    purchasing !== null ||
+                    purchasing !==
+                      null ||
                     (
                       athleteSpecific &&
                       !selectedAthlete
@@ -519,7 +696,8 @@ function PlansContent() {
                       grant(p)
                     }
                     disabled={
-                      purchasing !== null ||
+                      purchasing !==
+                        null ||
                       (
                         athleteSpecific &&
                         !selectedAthlete
