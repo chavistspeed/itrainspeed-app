@@ -6,9 +6,12 @@ export const dynamic = 'force-dynamic'
 
 function addDays(date, days) {
   const result = new Date(date)
+
   result.setUTCDate(
-    result.getUTCDate() + Number(days || 0)
+    result.getUTCDate() +
+      Number(days || 0)
   )
+
   return result.toISOString()
 }
 
@@ -59,21 +62,199 @@ async function markEventProcessed(
   }
 }
 
-function isPromoSoldOutError(error) {
-  const message =
-    error?.message ||
-    error?.details ||
-    ''
+function errorContains(
+  error,
+  value
+) {
+  const message = [
+    error?.message,
+    error?.details,
+    error?.hint,
+    error?.code,
+  ]
+    .filter(Boolean)
+    .join(' ')
 
   return String(message).includes(
+    value
+  )
+}
+
+function isPromoSoldOutError(
+  error
+) {
+  return errorContains(
+    error,
     'PROMO_SOLD_OUT'
   )
 }
 
-async function refundSoldOutCheckout(
-  stripe,
-  session
+function isAthleteAlreadyEnrolledError(
+  error
 ) {
+  return errorContains(
+    error,
+    'ATHLETE_ALREADY_ENROLLED'
+  )
+}
+
+/*
+ * -------------------------------------------------------
+ * FAILED LIMITED MEMBERSHIP RECOVERY
+ * -------------------------------------------------------
+ *
+ * This protects against the rare race condition where
+ * multiple customers enter Stripe Checkout while only
+ * one limited membership spot remains.
+ *
+ * For one-time payments:
+ *   Refund the Checkout PaymentIntent.
+ *
+ * For subscriptions:
+ *   1. Retrieve the subscription.
+ *   2. Find the successful payment from its latest invoice.
+ *   3. Cancel the subscription immediately.
+ *   4. Refund that successful payment.
+ *
+ * The operation is idempotent so Stripe webhook retries
+ * cannot intentionally create multiple refunds.
+ */
+
+async function cancelAndRefundRejectedCheckout(
+  stripe,
+  session,
+  reason
+) {
+  const subscriptionId =
+    typeof session.subscription ===
+    'string'
+      ? session.subscription
+      : session.subscription?.id ||
+        null
+
+  /*
+   * -----------------------------------------------------
+   * SUBSCRIPTION CHECKOUT
+   * -----------------------------------------------------
+   */
+  if (subscriptionId) {
+    let subscription = null
+
+    try {
+      subscription =
+        await stripe.subscriptions.retrieve(
+          subscriptionId,
+          {
+            expand: [
+              'latest_invoice.payment_intent',
+            ],
+          }
+        )
+    } catch (error) {
+      console.error(
+        'Unable to retrieve rejected Stripe subscription:',
+        {
+          subscriptionId,
+          checkoutSessionId:
+            session.id,
+          error:
+            error?.message ||
+            error,
+        }
+      )
+
+      throw error
+    }
+
+    const latestInvoice =
+      typeof subscription.latest_invoice ===
+      'object'
+        ? subscription.latest_invoice
+        : null
+
+    let paymentIntentId = null
+
+    if (latestInvoice) {
+      paymentIntentId =
+        typeof latestInvoice.payment_intent ===
+        'string'
+          ? latestInvoice.payment_intent
+          : latestInvoice
+              .payment_intent?.id ||
+            null
+    }
+
+    /*
+     * Cancel first so the rejected membership
+     * cannot renew in the future.
+     *
+     * We intentionally do not prorate or create
+     * a cancellation invoice because this
+     * membership was never successfully
+     * fulfilled by iTrainSpeed.
+     */
+    if (
+      subscription.status !==
+      'canceled'
+    ) {
+      await stripe.subscriptions.cancel(
+        subscriptionId,
+        {
+          prorate: false,
+        }
+      )
+    }
+
+    /*
+     * If the initial subscription payment
+     * succeeded, refund it.
+     */
+    if (paymentIntentId) {
+      await stripe.refunds.create(
+        {
+          payment_intent:
+            paymentIntentId,
+
+          metadata: {
+            reason,
+            checkout_session_id:
+              session.id,
+            subscription_id:
+              subscriptionId,
+          },
+        },
+        {
+          idempotencyKey:
+            `rejected-membership-refund-${session.id}`,
+        }
+      )
+    } else {
+      /*
+       * A completed Checkout session should normally
+       * have a successful first invoice for this
+       * membership. If Stripe does not expose a
+       * PaymentIntent, throw so Stripe retries the
+       * webhook rather than silently marking this
+       * event complete without a refund.
+       */
+      throw new Error(
+        'Rejected subscription was cancelled, but its successful payment could not be located for refund.'
+      )
+    }
+
+    return {
+      subscriptionCancelled:
+        true,
+      refunded: true,
+    }
+  }
+
+  /*
+   * -----------------------------------------------------
+   * ONE-TIME CHECKOUT
+   * -----------------------------------------------------
+   */
+
   const paymentIntentId =
     typeof session.payment_intent ===
     'string'
@@ -83,7 +264,7 @@ async function refundSoldOutCheckout(
 
   if (!paymentIntentId) {
     throw new Error(
-      'Limited package sold out, but no PaymentIntent was available to refund.'
+      'Rejected Checkout session did not contain a PaymentIntent to refund.'
     )
   }
 
@@ -93,18 +274,22 @@ async function refundSoldOutCheckout(
         paymentIntentId,
 
       metadata: {
-        reason:
-          'itrainspeed_limited_package_sold_out',
-
+        reason,
         checkout_session_id:
           session.id,
       },
     },
     {
       idempotencyKey:
-        `sold-out-${session.id}`,
+        `rejected-checkout-refund-${session.id}`,
     }
   )
+
+  return {
+    subscriptionCancelled:
+      false,
+    refunded: true,
+  }
 }
 
 async function fulfillCheckout(
@@ -249,6 +434,17 @@ async function fulfillCheckout(
       packageData.purchase_limit
     ) > 0
 
+  /*
+   * -----------------------------------------------------
+   * LIMITED PACKAGE FULFILLMENT
+   * -----------------------------------------------------
+   *
+   * The database transaction is the final authority
+   * for both:
+   *
+   * - permanent limited-package capacity
+   * - duplicate active athlete enrollment
+   */
   if (hasPurchaseLimit) {
     const {
       error: limitedFulfillmentError,
@@ -290,33 +486,91 @@ async function fulfillCheckout(
       }
     )
 
-    if (limitedFulfillmentError) {
+    if (
+      limitedFulfillmentError
+    ) {
+      /*
+       * Race condition #1:
+       * Customer paid just after the final
+       * available limited spot was claimed.
+       */
       if (
         isPromoSoldOutError(
           limitedFulfillmentError
         )
       ) {
-        await refundSoldOutCheckout(
+        await cancelAndRefundRejectedCheckout(
           stripe,
-          session
+          session,
+          'itrainspeed_limited_package_sold_out'
         )
 
         console.warn(
-          'Limited package sold out after payment. Payment automatically refunded.',
+          'Limited package sold out after payment. Subscription/payment automatically cancelled and refunded.',
           {
             checkoutSessionId:
               session.id,
+
+            subscriptionId,
 
             packageId:
               packageData.id,
 
             guardianId,
+
+            athleteId:
+              entitlementAthleteId,
           }
         )
 
         return {
-          refundedBecauseSoldOut:
-            true,
+          rejected: true,
+          reason:
+            'PROMO_SOLD_OUT',
+        }
+      }
+
+      /*
+       * Race condition #2:
+       * Two Checkout sessions for the same
+       * athlete complete nearly simultaneously.
+       *
+       * The database accepts the first and
+       * rejects the duplicate.
+       */
+      if (
+        isAthleteAlreadyEnrolledError(
+          limitedFulfillmentError
+        )
+      ) {
+        await cancelAndRefundRejectedCheckout(
+          stripe,
+          session,
+          'itrainspeed_athlete_already_enrolled'
+        )
+
+        console.warn(
+          'Duplicate athlete membership reached payment. Duplicate subscription/payment automatically cancelled and refunded.',
+          {
+            checkoutSessionId:
+              session.id,
+
+            subscriptionId,
+
+            packageId:
+              packageData.id,
+
+            guardianId,
+
+            athleteId:
+              entitlementAthleteId,
+          }
+        )
+
+        return {
+          rejected: true,
+          reason:
+            'ATHLETE_ALREADY_ENROLLED',
         }
       }
 
@@ -387,8 +641,7 @@ async function fulfillCheckout(
   }
 
   return {
-    refundedBecauseSoldOut:
-      false,
+    rejected: false,
   }
 }
 
