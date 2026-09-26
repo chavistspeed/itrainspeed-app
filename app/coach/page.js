@@ -12,9 +12,11 @@ const SERVICE_TYPES = [
 ]
 
 const serviceLabel = (type) =>
-  SERVICE_TYPES.find(([value]) => value === type)?.[1] || type || 'Group Training'
+  SERVICE_TYPES.find(([value]) => value === type)?.[1] ||
+  type ||
+  'Group Training'
 
-const blankProgram = {
+const makeBlankProgram = () => ({
   name: '',
   category: 'Speed & Agility',
   min_age: 6,
@@ -25,7 +27,7 @@ const blankProgram = {
   price_cents: 3500,
   price_dollars: '35.00',
   active: true,
-}
+})
 
 export default function Coach() {
   const [role, setRole] = useState('')
@@ -35,6 +37,7 @@ export default function Coach() {
   const [roster, setRoster] = useState([])
   const [rosterMsg, setRosterMsg] = useState('')
   const [tab, setTab] = useState('schedule')
+
   const [f, setF] = useState({
     program_id: '',
     start_at: '',
@@ -43,10 +46,11 @@ export default function Coach() {
     location: 'iTrainSpeed',
     repeat_weeks: 1,
   })
+
   const [msg, setMsg] = useState('')
   const [pm, setPm] = useState('')
   const [editing, setEditing] = useState(null)
-  const [pf, setPf] = useState(blankProgram)
+  const [pf, setPf] = useState(makeBlankProgram())
 
   async function load() {
     const s = supabase()
@@ -57,8 +61,15 @@ export default function Coach() {
 
     if (!user) return
 
-    const [{ data: p }, { data: pr }, { data: ss }] = await Promise.all([
-      s.from('profiles').select('role').eq('id', user.id).single(),
+    const [
+      { data: profile },
+      { data: programRows },
+      { data: sessionRows },
+    ] = await Promise.all([
+      s.from('profiles')
+        .select('role')
+        .eq('id', user.id)
+        .single(),
 
       s.from('programs')
         .select('*')
@@ -72,18 +83,17 @@ export default function Coach() {
         .limit(100),
     ])
 
-    setRole(p?.role || 'parent')
-    setPrograms(pr || [])
+    setRole(profile?.role || 'parent')
+    setPrograms(programRows || [])
+    setSessions(sessionRows || [])
 
-    setF((x) => ({
-      ...x,
+    setF((current) => ({
+      ...current,
       program_id:
-        x.program_id ||
-        pr?.find((z) => z.active)?.id ||
+        current.program_id ||
+        programRows?.find((program) => program.active)?.id ||
         '',
     }))
-
-    setSessions(ss || [])
   }
 
   useEffect(() => {
@@ -100,70 +110,89 @@ export default function Coach() {
       data: { user },
     } = await s.auth.getUser()
 
+    if (!user) {
+      setMsg('Please sign in again.')
+      return
+    }
+
     const base = new Date(f.start_at)
+
+    if (Number.isNaN(base.getTime())) {
+      setMsg('Please select a valid date and time.')
+      return
+    }
 
     const count = Math.max(
       1,
       Math.min(26, Number(f.repeat_weeks) || 1)
     )
 
-    const rows = Array.from({ length: count }, (_, i) => ({
-      ...f,
-      repeat_weeks: undefined,
-      duration_minutes: Number(f.duration_minutes),
-      capacity: Number(f.capacity),
-      start_at: new Date(
-        base.getTime() + i * 7 * 24 * 60 * 60 * 1000
-      ).toISOString(),
-      created_by: user.id,
-      status: 'published',
-    })).map(({ repeat_weeks, ...x }) => x)
+    const rows = Array.from(
+      { length: count },
+      (_, i) => ({
+        program_id: f.program_id,
+        start_at: new Date(
+          base.getTime() +
+            i * 7 * 24 * 60 * 60 * 1000
+        ).toISOString(),
+        duration_minutes: Number(f.duration_minutes),
+        capacity: Number(f.capacity),
+        location: f.location,
+        created_by: user.id,
+        status: 'published',
+      })
+    )
 
-    const { error } = await s.from('sessions').insert(rows)
+    const { error } = await s
+      .from('sessions')
+      .insert(rows)
 
     setMsg(
       error
         ? error.message
-        : `${count} session${count > 1 ? 's' : ''} published.`
+        : `${count} session${
+            count > 1 ? 's' : ''
+          } published.`
     )
 
-    if (!error) load()
+    if (!error) {
+      await load()
+    }
   }
 
-  async function openRoster(x) {
-    setSelected(x)
+  async function openRoster(session) {
+    setSelected(session)
     setRosterMsg('')
 
     const { data, error } = await supabase().rpc(
       'get_session_roster',
       {
-        p_session_id: x.id,
+        p_session_id: session.id,
       }
     )
 
     if (error) {
       setRoster([])
       setRosterMsg(error.message)
-    } else {
-      setRoster(data || [])
-    }
-  }
-
-  async function cancelSession(x) {
-    if (
-      !confirm(
-        `Cancel ${x.program_name} on ${new Date(
-          x.start_at
-        ).toLocaleString()}? Booked athletes will have their credits restored.`
-      )
-    ) {
       return
     }
+
+    setRoster(data || [])
+  }
+
+  async function cancelSession(session) {
+    const confirmed = confirm(
+      `Cancel ${session.program_name} on ${new Date(
+        session.start_at
+      ).toLocaleString()}? Booked athletes will have their credits restored.`
+    )
+
+    if (!confirmed) return
 
     const { error } = await supabase().rpc(
       'admin_cancel_session',
       {
-        p_session_id: x.id,
+        p_session_id: session.id,
       }
     )
 
@@ -175,30 +204,46 @@ export default function Coach() {
 
     setSelected(null)
 
-    if (!error) load()
+    if (!error) {
+      await load()
+    }
   }
 
-  function editProgram(p) {
-    const type = p.service_type || p.credit_type || 'group'
+  function editProgram(program) {
+    const type =
+      program.service_type ||
+      program.credit_type ||
+      'group'
 
-    setEditing(p.id)
+    setEditing(program.id)
 
     setPf({
-  name: p.name || '',
-  category: p.category || '',
-  min_age: p.min_age ?? 6,
-  max_age: p.max_age ?? 18,
-  credit_cost: p.credit_cost ?? 1,
-  credit_type: type,
-  service_type: type,
-  price_cents: p.price_cents ?? 0,
-  price_dollars: (
-    Number(p.price_cents ?? 0) / 100
-  ).toFixed(2),
-  active: p.active !== false,
-})
+      name: program.name || '',
+      category:
+        program.category || 'Speed & Agility',
+      min_age: program.min_age ?? 6,
+      max_age: program.max_age ?? 18,
+      credit_cost: program.credit_cost ?? 1,
+      credit_type: type,
+      service_type: type,
+      price_cents: program.price_cents ?? 0,
+
+      // Keep the editable dollar value separate
+      // from the integer cents stored in Supabase.
+      price_dollars: (
+        Number(program.price_cents ?? 0) / 100
+      ).toFixed(2),
+
+      active: program.active !== false,
+    })
 
     setTab('programs')
+    setPm('')
+  }
+
+  function cancelProgramEdit() {
+    setEditing(null)
+    setPf(makeBlankProgram())
     setPm('')
   }
 
@@ -214,31 +259,84 @@ export default function Coach() {
     e.preventDefault()
     setPm('')
 
+    if (!pf.name.trim()) {
+      setPm('Please enter a program name.')
+      return
+    }
+
     if (!pf.service_type) {
       setPm('Please select a service type.')
       return
     }
 
-    const payload = {
-      ...pf,
-      service_type: pf.service_type,
-      credit_type: pf.service_type,
-      min_age: Number(pf.min_age),
-      max_age: Number(pf.max_age),
-      credit_cost: Number(pf.credit_cost),
-      price_cents: Math.round(
-  Number(pf.price_dollars || 0) * 100
-),
+    const priceDollars = Number(pf.price_dollars)
+
+    if (
+      !Number.isFinite(priceDollars) ||
+      priceDollars < 0
+    ) {
+      setPm(
+        'Please enter a valid single-session price.'
+      )
+      return
     }
-    delete payload.price_dollars
+
+    const minAge = Number(pf.min_age)
+    const maxAge = Number(pf.max_age)
+    const creditCost = Number(pf.credit_cost)
+
+    if (
+      !Number.isFinite(minAge) ||
+      !Number.isFinite(maxAge) ||
+      minAge < 0 ||
+      maxAge < minAge
+    ) {
+      setPm('Please enter a valid age range.')
+      return
+    }
+
+    if (
+      !Number.isFinite(creditCost) ||
+      creditCost < 0
+    ) {
+      setPm(
+        'Please enter a valid credit cost.'
+      )
+      return
+    }
+
+    // Only send actual database columns to Supabase.
+    // price_dollars is intentionally NOT included.
+    const payload = {
+      name: pf.name.trim(),
+      category: pf.category,
+      min_age: minAge,
+      max_age: maxAge,
+      credit_cost: creditCost,
+      credit_type: pf.service_type,
+      service_type: pf.service_type,
+      price_cents: Math.round(
+        priceDollars * 100
+      ),
+      active: Boolean(pf.active),
+    }
 
     const s = supabase()
 
-    const q = editing
-      ? s.from('programs').update(payload).eq('id', editing)
-      : s.from('programs').insert(payload)
+    let result
 
-    const { error } = await q
+    if (editing) {
+      result = await s
+        .from('programs')
+        .update(payload)
+        .eq('id', editing)
+    } else {
+      result = await s
+        .from('programs')
+        .insert(payload)
+    }
+
+    const { error } = result
 
     setPm(
       error
@@ -250,24 +348,32 @@ export default function Coach() {
 
     if (!error) {
       setEditing(null)
-      setPf(blankProgram)
+      setPf(makeBlankProgram())
       await load()
     }
   }
 
-  async function toggleProgram(p) {
+  async function toggleProgram(program) {
     const { error } = await supabase()
       .from('programs')
-      .update({ active: !p.active })
-      .eq('id', p.id)
+      .update({
+        active: !program.active,
+      })
+      .eq('id', program.id)
 
     setPm(
       error
         ? error.message
-        : `${p.name} ${p.active ? 'archived' : 'activated'}.`
+        : `${program.name} ${
+            program.active
+              ? 'archived'
+              : 'activated'
+          }.`
     )
 
-    if (!error) load()
+    if (!error) {
+      await load()
+    }
   }
 
   if (role && role === 'parent') {
@@ -324,19 +430,26 @@ export default function Coach() {
                     onChange={(e) =>
                       setF({
                         ...f,
-                        program_id: e.target.value,
+                        program_id:
+                          e.target.value,
                       })
                     }
                     required
                   >
                     {programs
-                      .filter((p) => p.active)
-                      .map((p) => (
-                        <option key={p.id} value={p.id}>
-                          {p.name} —{' '}
+                      .filter(
+                        (program) =>
+                          program.active
+                      )
+                      .map((program) => (
+                        <option
+                          key={program.id}
+                          value={program.id}
+                        >
+                          {program.name} —{' '}
                           {serviceLabel(
-                            p.service_type ||
-                              p.credit_type
+                            program.service_type ||
+                              program.credit_type
                           )}
                         </option>
                       ))}
@@ -351,7 +464,8 @@ export default function Coach() {
                     onChange={(e) =>
                       setF({
                         ...f,
-                        start_at: e.target.value,
+                        start_at:
+                          e.target.value,
                       })
                     }
                     required
@@ -368,9 +482,11 @@ export default function Coach() {
                       onChange={(e) =>
                         setF({
                           ...f,
-                          capacity: e.target.value,
+                          capacity:
+                            e.target.value,
                         })
                       }
+                      required
                     />
                   </label>
 
@@ -379,7 +495,9 @@ export default function Coach() {
                     <input
                       type="number"
                       min="15"
-                      value={f.duration_minutes}
+                      value={
+                        f.duration_minutes
+                      }
                       onChange={(e) =>
                         setF({
                           ...f,
@@ -387,6 +505,7 @@ export default function Coach() {
                             e.target.value,
                         })
                       }
+                      required
                     />
                   </label>
                 </div>
@@ -398,9 +517,11 @@ export default function Coach() {
                     onChange={(e) =>
                       setF({
                         ...f,
-                        location: e.target.value,
+                        location:
+                          e.target.value,
                       })
                     }
+                    required
                   />
                 </label>
 
@@ -411,13 +532,17 @@ export default function Coach() {
                     onChange={(e) =>
                       setF({
                         ...f,
-                        repeat_weeks: e.target.value,
+                        repeat_weeks:
+                          e.target.value,
                       })
                     }
                   >
                     {[1, 2, 4, 6, 8, 10, 12].map(
                       (n) => (
-                        <option key={n} value={n}>
+                        <option
+                          key={n}
+                          value={n}
+                        >
                           {n === 1
                             ? 'No repeat'
                             : `${n} weeks`}
@@ -427,7 +552,7 @@ export default function Coach() {
                   </select>
                 </label>
 
-                <button>
+                <button type="submit">
                   Publish{' '}
                   {Number(f.repeat_weeks) > 1
                     ? `${f.repeat_weeks} sessions`
@@ -436,50 +561,68 @@ export default function Coach() {
               </form>
 
               {msg && (
-                <div className="notice">{msg}</div>
+                <div className="notice">
+                  {msg}
+                </div>
               )}
             </section>
 
             <section>
               <h2>Upcoming schedule</h2>
 
-              {sessions.map((x) => (
-                <div
-                  className="card compact"
-                  key={x.id}
-                >
-                  <b>{x.program_name}</b>
+              {sessions.length ? (
+                sessions.map((session) => (
+                  <div
+                    className="card compact"
+                    key={session.id}
+                  >
+                    <b>
+                      {session.program_name}
+                    </b>
 
-                  <span>
-                    {new Date(
-                      x.start_at
-                    ).toLocaleString()}
-                  </span>
+                    <span>
+                      {new Date(
+                        session.start_at
+                      ).toLocaleString()}
+                    </span>
 
-                  <span>
-                    {x.booked_count}/{x.capacity}{' '}
-                    booked • {x.location}
-                  </span>
+                    <span>
+                      {session.booked_count}/
+                      {session.capacity}{' '}
+                      booked •{' '}
+                      {session.location}
+                    </span>
 
-                  <div className="inlineActions">
-                    <button
-                      className="linkBtn"
-                      onClick={() => openRoster(x)}
-                    >
-                      View roster →
-                    </button>
+                    <div className="inlineActions">
+                      <button
+                        type="button"
+                        className="linkBtn"
+                        onClick={() =>
+                          openRoster(session)
+                        }
+                      >
+                        View roster →
+                      </button>
 
-                    <button
-                      className="dangerGhost"
-                      onClick={() =>
-                        cancelSession(x)
-                      }
-                    >
-                      Cancel session
-                    </button>
+                      <button
+                        type="button"
+                        className="dangerGhost"
+                        onClick={() =>
+                          cancelSession(
+                            session
+                          )
+                        }
+                      >
+                        Cancel session
+                      </button>
+                    </div>
                   </div>
+                ))
+              ) : (
+                <div className="empty">
+                  No upcoming sessions.
                 </div>
-              ))}
+              )}
             </section>
           </div>
 
@@ -487,7 +630,9 @@ export default function Coach() {
             <section className="rosterPanel card">
               <div className="row">
                 <div>
-                  <small>SESSION ROSTER</small>
+                  <small>
+                    SESSION ROSTER
+                  </small>
 
                   <h2>
                     {selected.program_name}
@@ -502,6 +647,7 @@ export default function Coach() {
                 </div>
 
                 <button
+                  type="button"
                   className="secondary smallBtn"
                   onClick={() =>
                     setSelected(null)
@@ -519,21 +665,22 @@ export default function Coach() {
 
               {!rosterMsg &&
                 (roster.length ? (
-                  roster.map((x, i) => (
+                  roster.map((item, i) => (
                     <div
                       className="rosterRow"
-                      key={x.booking_id}
+                      key={item.booking_id}
                     >
                       <b>
-                        {i + 1}. {x.athlete_name}
+                        {i + 1}.{' '}
+                        {item.athlete_name}
                       </b>
 
                       <span>
-                        {x.age
-                          ? `Age ${x.age}`
+                        {item.age
+                          ? `Age ${item.age}`
                           : ''}
-                        {x.sport
-                          ? ` • ${x.sport}`
+                        {item.sport
+                          ? ` • ${item.sport}`
                           : ''}
                       </span>
                     </div>
@@ -547,261 +694,253 @@ export default function Coach() {
           )}
         </>
       ) : (
-        <>
-          <div className="grid2">
-            <section className="card">
-              <h2>
-                {editing
-                  ? 'Edit program'
-                  : 'Add program'}
-              </h2>
+        <div className="grid2">
+          <section className="card">
+            <h2>
+              {editing
+                ? 'Edit program'
+                : 'Add program'}
+            </h2>
 
-              <form onSubmit={saveProgram}>
-                <label>
-                  Program name
-                  <input
-                    value={pf.name}
-                    onChange={(e) =>
-                      setPf({
-                        ...pf,
-                        name: e.target.value,
-                      })
-                    }
-                    required
-                  />
-                </label>
+            <form onSubmit={saveProgram}>
+              <label>
+                Program name
+                <input
+                  value={pf.name}
+                  onChange={(e) =>
+                    setPf({
+                      ...pf,
+                      name: e.target.value,
+                    })
+                  }
+                  required
+                />
+              </label>
 
-                <label>
-                  Category
-                  <select
-                    value={pf.category}
-                    onChange={(e) =>
-                      setPf({
-                        ...pf,
-                        category: e.target.value,
-                      })
-                    }
-                  >
-                    {[
-                      'Speed & Agility',
-                      'Track & Field',
-                      'Private Training',
-                      'Recovery',
-                    ].map((x) => (
-                      <option key={x}>{x}</option>
-                    ))}
-                  </select>
-                </label>
-
-                <label>
-                  Service Type
-                  <select
-                    value={pf.service_type}
-                    onChange={(e) =>
-                      updateServiceType(
-                        e.target.value
-                      )
-                    }
-                    required
-                  >
-                    {SERVICE_TYPES.map(
-                      ([value, text]) => (
-                        <option
-                          key={value}
-                          value={value}
-                        >
-                          {text}
-                        </option>
-                      )
-                    )}
-                  </select>
-                </label>
-
-                <small className="subtle">
-                  This determines which package,
-                  credits, or membership can be used
-                  to book this program.
-                </small>
-
-                <div className="form2">
-                  <label>
-                    Minimum age
-                    <input
-                      type="number"
-                      value={pf.min_age}
-                      onChange={(e) =>
-                        setPf({
-                          ...pf,
-                          min_age: e.target.value,
-                        })
-                      }
-                    />
-                  </label>
-
-                  <label>
-                    Maximum age
-                    <input
-                      type="number"
-                      value={pf.max_age}
-                      onChange={(e) =>
-                        setPf({
-                          ...pf,
-                          max_age: e.target.value,
-                        })
-                      }
-                    />
-                  </label>
-                </div>
-
-          <div className="form2">
-  <label>
-    Credits per booking
-    <input
-      type="number"
-      min="0"
-      value={pf.credit_cost}
-      onChange={(e) =>
-        setPf({
-          ...pf,
-          credit_cost: e.target.value,
-        })
-      }
-    />
-  </label>
-
-  <label>
-    Single-session price ($)
-    <input
-      type="number"
-      min="0"
-      step="0.01"
-      value={pf.price_dollars}
-      onChange={(e) =>
-        setPf({
-          ...pf,
-          price_dollars: e.target.value,
-        })
-      }
-    />
-  </label>
-</div>
-                  <label>
-                    Credits per booking
-                    <input
-                      type="number"
-                      min="0"
-                      value={pf.credit_cost}
-                      onChange={(e) =>
-                        setPf({
-                          ...pf,
-                          credit_cost:
-                            e.target.value,
-                        })
-                      }
-                    />
-                  </label>
-
-                  <label>
-                   <label>
-  Single-session price ($)
-  <input
-    type="number"
-    min="0"
-    step="0.01"
-    value={pf.price_dollars}
-    onChange={(e) =>
-      setPf({
-        ...pf,
-        price_dollars: e.target.value,
-      })
-    }
-  />
-</label>
-                </div>
-
-                <label className="check">
-                  <input
-                    type="checkbox"
-                    checked={pf.active}
-                    onChange={(e) =>
-                      setPf({
-                        ...pf,
-                        active: e.target.checked,
-                      })
-                    }
-                  />
-                  Active / bookable
-                </label>
-
-                <div className="inlineActions">
-                  <button>
-                    {editing
-                      ? 'Save changes'
-                      : 'Create program'}
-                  </button>
-
-                  {editing && (
-                    <button
-                      type="button"
-                      className="secondary smallBtn"
-                      onClick={() => {
-                        setEditing(null)
-                        setPf(blankProgram)
-                      }}
+              <label>
+                Category
+                <select
+                  value={pf.category}
+                  onChange={(e) =>
+                    setPf({
+                      ...pf,
+                      category:
+                        e.target.value,
+                    })
+                  }
+                >
+                  {[
+                    'Speed & Agility',
+                    'Track & Field',
+                    'Private Training',
+                    'Recovery',
+                  ].map((category) => (
+                    <option
+                      key={category}
+                      value={category}
                     >
-                      Cancel edit
-                    </button>
+                      {category}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label>
+                Service Type
+                <select
+                  value={pf.service_type}
+                  onChange={(e) =>
+                    updateServiceType(
+                      e.target.value
+                    )
+                  }
+                  required
+                >
+                  {SERVICE_TYPES.map(
+                    ([value, text]) => (
+                      <option
+                        key={value}
+                        value={value}
+                      >
+                        {text}
+                      </option>
+                    )
                   )}
-                </div>
-              </form>
+                </select>
+              </label>
 
-              {pm && (
-                <div className="notice">{pm}</div>
-              )}
-            </section>
+              <small className="subtle">
+                This determines which package,
+                credits, or membership can be
+                used to book this program.
+              </small>
 
-            <section>
-              <h2>Class offerings</h2>
+              <div className="form2">
+                <label>
+                  Minimum age
+                  <input
+                    type="number"
+                    min="0"
+                    value={pf.min_age}
+                    onChange={(e) =>
+                      setPf({
+                        ...pf,
+                        min_age:
+                          e.target.value,
+                      })
+                    }
+                    required
+                  />
+                </label>
 
-              {programs.map((p) => (
+                <label>
+                  Maximum age
+                  <input
+                    type="number"
+                    min="0"
+                    value={pf.max_age}
+                    onChange={(e) =>
+                      setPf({
+                        ...pf,
+                        max_age:
+                          e.target.value,
+                      })
+                    }
+                    required
+                  />
+                </label>
+              </div>
+
+              <div className="form2">
+                <label>
+                  Credits per booking
+                  <input
+                    type="number"
+                    min="0"
+                    step="1"
+                    value={pf.credit_cost}
+                    onChange={(e) =>
+                      setPf({
+                        ...pf,
+                        credit_cost:
+                          e.target.value,
+                      })
+                    }
+                    required
+                  />
+                </label>
+
+                <label>
+                  Single-session price ($)
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={pf.price_dollars}
+                    onChange={(e) =>
+                      setPf({
+                        ...pf,
+                        price_dollars:
+                          e.target.value,
+                      })
+                    }
+                    required
+                  />
+                </label>
+              </div>
+
+              <label className="check">
+                <input
+                  type="checkbox"
+                  checked={pf.active}
+                  onChange={(e) =>
+                    setPf({
+                      ...pf,
+                      active:
+                        e.target.checked,
+                    })
+                  }
+                />
+                Active / bookable
+              </label>
+
+              <div className="inlineActions">
+                <button type="submit">
+                  {editing
+                    ? 'Save changes'
+                    : 'Create program'}
+                </button>
+
+                {editing && (
+                  <button
+                    type="button"
+                    className="secondary smallBtn"
+                    onClick={
+                      cancelProgramEdit
+                    }
+                  >
+                    Cancel edit
+                  </button>
+                )}
+              </div>
+            </form>
+
+            {pm && (
+              <div className="notice">
+                {pm}
+              </div>
+            )}
+          </section>
+
+          <section>
+            <h2>Class offerings</h2>
+
+            {programs.length ? (
+              programs.map((program) => (
                 <div
                   className="card programCard"
-                  key={p.id}
+                  key={program.id}
                 >
                   <div>
                     <div className="programTop">
-                      <b>{p.name}</b>
+                      <b>{program.name}</b>
 
                       <span
                         className={
-                          p.active
+                          program.active
                             ? 'status activeStatus'
                             : 'status'
                         }
                       >
-                        {p.active
+                        {program.active
                           ? 'Active'
                           : 'Archived'}
                       </span>
                     </div>
 
                     <span>
-                      {p.category} • Ages{' '}
-                      {p.min_age}–{p.max_age}
+                      {program.category} •
+                      Ages {program.min_age}–
+                      {program.max_age}
                     </span>
 
                     <span>
                       {serviceLabel(
-                        p.service_type ||
-                          p.credit_type
+                        program.service_type ||
+                          program.credit_type
                       )}{' '}
-                      • {p.credit_cost} credit
-                      {p.credit_cost === 1
+                      • {program.credit_cost}{' '}
+                      credit
+                      {program.credit_cost ===
+                      1
                         ? ''
                         : 's'}{' '}
                       • $
                       {(
-                        p.price_cents / 100
+                        Number(
+                          program.price_cents ||
+                            0
+                        ) / 100
                       ).toFixed(2)}{' '}
                       single session
                     </span>
@@ -809,30 +948,38 @@ export default function Coach() {
 
                   <div className="inlineActions">
                     <button
+                      type="button"
                       className="linkBtn"
                       onClick={() =>
-                        editProgram(p)
+                        editProgram(program)
                       }
                     >
                       Edit
                     </button>
 
                     <button
+                      type="button"
                       className="dangerGhost"
                       onClick={() =>
-                        toggleProgram(p)
+                        toggleProgram(
+                          program
+                        )
                       }
                     >
-                      {p.active
+                      {program.active
                         ? 'Archive'
                         : 'Activate'}
                     </button>
                   </div>
                 </div>
-              ))}
-            </section>
-          </div>
-        </>
+              ))
+            ) : (
+              <div className="empty">
+                No programs created yet.
+              </div>
+            )}
+          </section>
+        </div>
       )}
     </AppShell>
   )
