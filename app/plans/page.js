@@ -192,22 +192,12 @@ function PlansContent() {
 
       const result = await response.json()
 
-if (!response.ok) {
-  if (result.diagnostic) {
-    throw new Error(
-      JSON.stringify(
-        result.diagnostic,
-        null,
-        2
-      )
-    )
-  }
-
-  throw new Error(
-    result.error ||
-      'Unable to start checkout.'
-  )
-}
+      if (!response.ok) {
+        throw new Error(
+          result.error ||
+            'Unable to start checkout.'
+        )
+      }
 
       if (!result.url) {
         throw new Error(
