@@ -18,21 +18,25 @@ const label = (t) =>
     recovery: 'Recovery',
   }[t] || t)
 
-/*
- * Determines whether a package belongs to one athlete.
- *
- * Track access is athlete-specific.
- * Group memberships such as Founding Athlete Membership
- * are athlete-specific.
- *
- * Normal Group credit packages remain family-shared.
- */
 const isAthleteSpecific = (p) =>
   p?.credit_type === 'track' ||
   (
     p?.credit_type === 'group' &&
     p?.access_type === 'membership'
   )
+
+const formatDate = (value) => {
+  if (!value) return ''
+
+  return new Date(value).toLocaleDateString(
+    undefined,
+    {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+    }
+  )
+}
 
 function PlansContent() {
   const searchParams = useSearchParams()
@@ -79,7 +83,7 @@ function PlansContent() {
         .order('sort_order'),
 
       s.from('entitlements')
-        .select('*,packages(name)')
+        .select('*,packages(name,price_cents,payment_type,access_type)')
         .eq('guardian_id', user.id)
         .eq('status', 'active')
         .order('created_at', {
@@ -234,13 +238,6 @@ function PlansContent() {
    * -------------------------------------------------------
    * STRIPE CUSTOMER PORTAL
    * -------------------------------------------------------
-   *
-   * Sends the signed-in guardian to Stripe's hosted
-   * billing portal.
-   *
-   * Stripe handles the sensitive billing interface.
-   * After the parent is finished, Stripe returns them
-   * to /plans.
    */
 
   async function openBillingPortal() {
@@ -256,7 +253,7 @@ function PlansContent() {
 
       if (!session?.access_token) {
         throw new Error(
-          'Please sign in again before managing your membership.'
+          'Please sign in again before managing billing.'
         )
       }
 
@@ -304,6 +301,10 @@ function PlansContent() {
    * -------------------------------------------------------
    * ADMIN TEST ACCESS
    * -------------------------------------------------------
+   *
+   * Keep the underlying admin function available during
+   * testing, but remove the large test-mode banner from
+   * the customer-facing page.
    */
 
   async function grant(p) {
@@ -360,7 +361,7 @@ function PlansContent() {
 
   /*
    * -------------------------------------------------------
-   * BOOKING LINKS
+   * BOOKING
    * -------------------------------------------------------
    */
 
@@ -403,6 +404,24 @@ function PlansContent() {
   }
 
   /*
+   * Hide fully-used credit packages from the
+   * customer's Active Access section.
+   *
+   * They remain in Supabase for history and
+   * cancellation/reconciliation purposes.
+   */
+  const visibleEntitlements =
+    ents.filter((e) => {
+      if (e.unlimited) {
+        return true
+      }
+
+      return Number(
+        e.credits_remaining || 0
+      ) > 0
+    })
+
+  /*
    * -------------------------------------------------------
    * PAGE
    * -------------------------------------------------------
@@ -422,12 +441,21 @@ function PlansContent() {
           </p>
         </div>
 
-        <div className="inlineActions">
+        <div
+          className="inlineActions"
+          style={{
+            flexWrap: 'nowrap',
+            alignItems: 'center',
+          }}
+        >
           <Link
             className="ctaLink"
             href="/booking"
+            style={{
+              whiteSpace: 'nowrap',
+            }}
           >
-            Book training
+            Book Training
           </Link>
 
           <button
@@ -438,10 +466,15 @@ function PlansContent() {
             disabled={
               openingPortal
             }
+            style={{
+              whiteSpace: 'nowrap',
+              width: 'auto',
+              minWidth: '150px',
+            }}
           >
             {openingPortal
-              ? 'Opening billing...'
-              : 'Manage Membership'}
+              ? 'Opening Billing...'
+              : 'Manage Billing'}
           </button>
         </div>
       </div>
@@ -449,19 +482,6 @@ function PlansContent() {
       {msg && (
         <div className="notice">
           {msg}
-        </div>
-      )}
-
-      {profile?.role ===
-        'admin' && (
-        <div className="notice">
-          <b>
-            Admin test mode:
-          </b>{' '}
-          Customer checkout is now
-          enabled. You can still grant
-          test packages without charging
-          a card.
         </div>
       )}
 
@@ -476,14 +496,40 @@ function PlansContent() {
           Your active access
         </h2>
 
-        {ents.length ? (
-          ents.map((e) => {
+        {visibleEntitlements.length ? (
+          visibleEntitlements.map((e) => {
             const athlete =
               athletes.find(
                 (x) =>
                   x.id ===
                   e.athlete_id
               )
+
+            const athleteName =
+              athlete
+                ? [
+                    athlete.first_name,
+                    athlete.last_name,
+                  ]
+                    .filter(Boolean)
+                    .join(' ')
+                : ''
+
+            const isRecurring =
+              Boolean(
+                e.stripe_subscription_id
+              )
+
+            const price =
+              e.packages?.price_cents
+
+            const scheduledToCancel =
+              Boolean(
+                e.cancel_at_period_end
+              )
+
+            const cancellationDate =
+              e.cancellation_effective_at
 
             return (
               <div
@@ -497,6 +543,18 @@ function PlansContent() {
                     ).toUpperCase()}
                   </small>
 
+                  {athleteName && (
+                    <div
+                      style={{
+                        marginTop: '10px',
+                        fontSize: '14px',
+                        fontWeight: 700,
+                      }}
+                    >
+                      {athleteName}
+                    </div>
+                  )}
+
                   <h3>
                     {e.packages
                       ?.name ||
@@ -504,6 +562,19 @@ function PlansContent() {
                         e.credit_type
                       )}
                   </h3>
+
+                  {isRecurring &&
+                    price != null && (
+                    <b
+                      style={{
+                        display: 'block',
+                        marginBottom: '8px',
+                      }}
+                    >
+                      {money(price)}
+                      /month
+                    </b>
+                  )}
 
                   <b className="balanceText">
                     {e.unlimited
@@ -518,31 +589,50 @@ function PlansContent() {
                         } remaining`}
                   </b>
 
-                  <span>
-                    {athlete
-                      ? `For ${
-                          athlete.first_name
-                        } ${
-                          athlete.last_name ||
-                          ''
-                        }`
-                      : 'Shared by all athletes on this account'}
-                  </span>
+                  {!athleteName && (
+                    <span>
+                      Shared by all athletes
+                      on this account
+                    </span>
+                  )}
 
-                  <span>
-                    {e.expires_at
-                      ? `Valid through ${new Date(
-                          e.expires_at
-                        ).toLocaleDateString()}`
-                      : e.stripe_subscription_id
-                        ? 'Active recurring membership'
-                        : 'No expiration'}
-                  </span>
+                  {scheduledToCancel &&
+                  cancellationDate ? (
+                    <span>
+                      Active through{' '}
+                      {formatDate(
+                        cancellationDate
+                      )}
+                    </span>
+                  ) : scheduledToCancel ? (
+                    <span>
+                      Cancellation scheduled
+                    </span>
+                  ) : e.expires_at ? (
+                    <span>
+                      Valid through{' '}
+                      {formatDate(
+                        e.expires_at
+                      )}
+                    </span>
+                  ) : isRecurring ? (
+                    <span>
+                      Active recurring
+                      membership
+                    </span>
+                  ) : (
+                    <span>
+                      No expiration
+                    </span>
+                  )}
                 </div>
 
                 <Link
                   className="ctaLink"
                   href={bookUrl(e)}
+                  style={{
+                    whiteSpace: 'nowrap',
+                  }}
                 >
                   {e.credit_type ===
                   'track'
