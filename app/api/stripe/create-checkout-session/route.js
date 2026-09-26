@@ -97,8 +97,46 @@ export async function POST(request) {
       )
     }
 
-    // Track memberships belong to one specific athlete.
-    if (creditType === 'track') {
+ // Track memberships and Group memberships belong
+// to one specific athlete.
+//
+// Normal Group credit packages remain family-shared.
+const requiresAthlete =
+  creditType === 'track' ||
+  (
+    creditType === 'group' &&
+    packageData.access_type === 'membership'
+  )
+
+if (requiresAthlete) {
+  if (!athleteId) {
+    return Response.json(
+      {
+        error:
+          'Please select the athlete receiving this membership.',
+      },
+      { status: 400 }
+    )
+  }
+
+  const { data: athlete, error: athleteError } =
+    await supabaseAdmin
+      .from('athletes')
+      .select('id, guardian_id')
+      .eq('id', athleteId)
+      .eq('guardian_id', user.id)
+      .single()
+
+  if (athleteError || !athlete) {
+    return Response.json(
+      {
+        error:
+          'That athlete is not available on your account.',
+      },
+      { status: 403 }
+    )
+  }
+}
       if (!athleteId) {
         return Response.json(
           {
@@ -128,7 +166,7 @@ export async function POST(request) {
     // Group/private/recovery access belongs to the family account.
     // Track access belongs to the selected athlete.
     const entitlementAthleteId =
-      creditType === 'track' ? athleteId : null
+  requiresAthlete ? athleteId : null
 
     /*
      * LIMITED PACKAGE PRE-CHECK
