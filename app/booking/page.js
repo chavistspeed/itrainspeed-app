@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { Suspense, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import AppShell from '../../components/AppShell'
@@ -14,7 +14,7 @@ const label = (type) =>
     recovery: 'Recovery',
   }[type] || type)
 
-export default function Booking() {
+function BookingContent() {
   const params = useSearchParams()
 
   const requestedType = params.get('type') || ''
@@ -338,5 +338,25 @@ export default function Booking() {
         )}
       </div>
     </AppShell>
+  )
+}
+export default function Booking() {
+  return (
+    <Suspense
+      fallback={
+        <AppShell title="Book Training">
+          <div className="pageTitleRow">
+            <div>
+              <h1>Book training</h1>
+              <p className="subtle">
+                Loading your available training...
+              </p>
+            </div>
+          </div>
+        </AppShell>
+      }
+    >
+      <BookingContent />
+    </Suspense>
   )
 }
