@@ -67,8 +67,8 @@ export async function POST(request) {
       )
     }
 
-    // Never trust pricing or entitlement details from the browser.
-    // Supabase is the source of truth.
+    // Supabase is the source of truth for package pricing
+    // and entitlement configuration.
     const { data: packageData, error: packageError } =
       await supabaseAdmin
         .from('packages')
@@ -97,51 +97,27 @@ export async function POST(request) {
       )
     }
 
- // Track memberships and Group memberships belong
-// to one specific athlete.
-//
-// Normal Group credit packages remain family-shared.
-const requiresAthlete =
-  creditType === 'track' ||
-  (
-    creditType === 'group' &&
-    packageData.access_type === 'membership'
-  )
+    /*
+     * Athlete-specific access:
+     *
+     * - Track memberships belong to one athlete.
+     * - Group memberships belong to one athlete.
+     * - Normal Group credit packages remain family-shared.
+     * - Private credit packages remain family-shared.
+     */
+    const requiresAthlete =
+      creditType === 'track' ||
+      (
+        creditType === 'group' &&
+        packageData.access_type === 'membership'
+      )
 
-if (requiresAthlete) {
-  if (!athleteId) {
-    return Response.json(
-      {
-        error:
-          'Please select the athlete receiving this membership.',
-      },
-      { status: 400 }
-    )
-  }
-
-  const { data: athlete, error: athleteError } =
-    await supabaseAdmin
-      .from('athletes')
-      .select('id, guardian_id')
-      .eq('id', athleteId)
-      .eq('guardian_id', user.id)
-      .single()
-
-  if (athleteError || !athlete) {
-    return Response.json(
-      {
-        error:
-          'That athlete is not available on your account.',
-      },
-      { status: 403 }
-    )
-  }
-}
+    if (requiresAthlete) {
       if (!athleteId) {
         return Response.json(
           {
             error:
-              'Please select the athlete receiving this Track & Field membership.',
+              'Please select the athlete receiving this membership.',
           },
           { status: 400 }
         )
@@ -157,25 +133,26 @@ if (requiresAthlete) {
 
       if (athleteError || !athlete) {
         return Response.json(
-          { error: 'That athlete is not available on your account.' },
+          {
+            error:
+              'That athlete is not available on your account.',
+          },
           { status: 403 }
         )
       }
     }
 
-    // Group/private/recovery access belongs to the family account.
-    // Track access belongs to the selected athlete.
     const entitlementAthleteId =
-  requiresAthlete ? athleteId : null
+      requiresAthlete ? athleteId : null
 
     /*
-     * LIMITED PACKAGE PRE-CHECK
+     * Limited-package pre-check.
      *
-     * This improves customer experience by preventing checkout
-     * from starting when a limited package is already sold out.
+     * This prevents a customer from entering Stripe Checkout
+     * when the package is already sold out.
      *
-     * The database fulfillment RPC remains the final authority
-     * against concurrent purchases.
+     * Final concurrency protection happens during webhook
+     * fulfillment inside PostgreSQL.
      */
     if (
       packageData.purchase_limit !== null &&
@@ -220,7 +197,7 @@ if (requiresAthlete) {
       }
     }
 
-    // Reuse the existing Stripe customer whenever possible.
+    // Reuse the parent's Stripe customer.
     const { data: profile, error: profileError } =
       await supabaseAdmin
         .from('profiles')
@@ -271,6 +248,10 @@ if (requiresAthlete) {
     const isSubscription =
       packageData.payment_type === 'subscription'
 
+    /*
+     * This metadata follows the purchase through Stripe and
+     * allows the webhook to create the correct entitlement.
+     */
     const metadata = {
       package_id: String(packageData.id),
       guardian_id: String(user.id),
