@@ -244,10 +244,26 @@ async function fulfillCheckout(
     )
   }
 
-  const entitlementAthleteId =
-    creditType === 'track'
-      ? athleteId
-      : null
+  const requiresAthlete =
+  creditType === 'track' ||
+  (
+    creditType === 'group' &&
+    packageData.access_type === 'membership'
+  )
+
+if (
+  requiresAthlete &&
+  !athleteId
+) {
+  throw new Error(
+    'Athlete-specific membership is missing its athlete.'
+  )
+}
+
+const entitlementAthleteId =
+  requiresAthlete
+    ? athleteId
+    : null
 
   const hasPurchaseLimit =
     packageData.purchase_limit !==
