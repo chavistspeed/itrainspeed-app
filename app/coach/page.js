@@ -23,6 +23,7 @@ const blankProgram = {
   credit_type: 'group',
   service_type: 'group',
   price_cents: 3500,
+  price_dollars: '35.00',
   active: true,
 }
 
@@ -183,16 +184,19 @@ export default function Coach() {
     setEditing(p.id)
 
     setPf({
-      name: p.name || '',
-      category: p.category || '',
-      min_age: p.min_age ?? 6,
-      max_age: p.max_age ?? 18,
-      credit_cost: p.credit_cost ?? 1,
-      credit_type: type,
-      service_type: type,
-      price_cents: p.price_cents ?? 0,
-      active: p.active !== false,
-    })
+  name: p.name || '',
+  category: p.category || '',
+  min_age: p.min_age ?? 6,
+  max_age: p.max_age ?? 18,
+  credit_cost: p.credit_cost ?? 1,
+  credit_type: type,
+  service_type: type,
+  price_cents: p.price_cents ?? 0,
+  price_dollars: (
+    Number(p.price_cents ?? 0) / 100
+  ).toFixed(2),
+  active: p.active !== false,
+})
 
     setTab('programs')
     setPm('')
@@ -222,8 +226,11 @@ export default function Coach() {
       min_age: Number(pf.min_age),
       max_age: Number(pf.max_age),
       credit_cost: Number(pf.credit_cost),
-      price_cents: Number(pf.price_cents),
+      price_cents: Math.round(
+  Number(pf.price_dollars || 0) * 100
+),
     }
+    delete payload.price_dollars
 
     const s = supabase()
 
@@ -664,28 +671,21 @@ export default function Coach() {
                   </label>
 
                   <label>
-                    Single-session price ($)
-                    <input
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      value={(
-                        Number(pf.price_cents) /
-                        100
-                      ).toFixed(2)}
-                      onChange={(e) =>
-                        setPf({
-                          ...pf,
-                          price_cents:
-                            Math.round(
-                              Number(
-                                e.target.value || 0
-                              ) * 100
-                            ),
-                        })
-                      }
-                    />
-                  </label>
+                   <label>
+  Single-session price ($)
+  <input
+    type="number"
+    min="0"
+    step="0.01"
+    value={pf.price_dollars}
+    onChange={(e) =>
+      setPf({
+        ...pf,
+        price_dollars: e.target.value,
+      })
+    }
+  />
+</label>
                 </div>
 
                 <label className="check">
