@@ -520,8 +520,7 @@ function PlansContent() {
                 e.stripe_subscription_id
               )
 
-            const price =
-              e.packages?.price_cents
+            
 
             const scheduledToCancel =
               Boolean(
@@ -563,18 +562,7 @@ function PlansContent() {
                       )}
                   </h3>
 
-                  {isRecurring &&
-                    price != null && (
-                    <b
-                      style={{
-                        display: 'block',
-                        marginBottom: '8px',
-                      }}
-                    >
-                      {money(price)}
-                      /month
-                    </b>
-                  )}
+
 
                   <b className="balanceText">
                     {e.unlimited
