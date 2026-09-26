@@ -30,6 +30,10 @@ function BookingContent() {
   const requestedAthlete =
     params.get('athlete') || ''
 
+  // NEW: specific entitlement selected from Plans
+  const requestedEntitlement =
+    params.get('entitlement') || ''
+
   const [athletes, setAthletes] =
     useState([])
 
@@ -83,7 +87,17 @@ function BookingContent() {
 
       s
         .from('entitlements')
-        .select('*')
+        .select(`
+          *,
+          packages (
+            id,
+            name,
+            access_type,
+            credit_type,
+            credits,
+            price_cents
+          )
+        `)
         .eq('guardian_id', user.id)
         .eq('status', 'active'),
     ])
@@ -138,71 +152,11 @@ function BookingContent() {
     loadBooked()
   }, [athlete])
 
-  /*
-   * V1.5 service-type compatibility.
-   *
-   * Programs now use service_type as the
-   * authoritative field.
-   *
-   * Older database views may still expose
-   * credit_type, so we support both while
-   * service_type takes priority.
-   */
   function sessionServiceType(session) {
     return (
       session.service_type ||
       session.credit_type ||
       ''
-    )
-  }
-
-  async function book(sessionId) {
-    if (!athlete) {
-      setMsg(
-        'Add or select an athlete first.'
-      )
-      return
-    }
-
-    setMsg('')
-
-    const { error } =
-      await supabase().rpc(
-        'book_session_v14',
-        {
-          p_session_id: sessionId,
-          p_athlete_id: athlete,
-        }
-      )
-
-    if (error) {
-      setMsg(error.message)
-      return
-    }
-
-    setMsg(
-      'Training booked successfully.'
-    )
-
-    await loadBase()
-
-    const { data } =
-      await supabase()
-        .from('bookings')
-        .select('session_id')
-        .eq(
-          'athlete_id',
-          athlete
-        )
-        .eq('status', 'booked')
-
-    setBooked(
-      new Set(
-        (data || []).map(
-          (booking) =>
-            booking.session_id
-        )
-      )
     )
   }
 
@@ -228,14 +182,6 @@ function BookingContent() {
               entitlement.credits_remaining
             ) > 0
 
-          /*
-           * Group and private credits are
-           * family-shared and therefore
-           * normally have no athlete_id.
-           *
-           * Athlete-specific access such as
-           * Track must match the athlete.
-           */
           const belongsToAthlete =
             !entitlement.athlete_id ||
             entitlement.athlete_id ===
@@ -250,14 +196,65 @@ function BookingContent() {
       )
     }, [ents, athlete])
 
-  const availableTypes = [
-    ...new Set(
-      validEntitlements.map(
-        (entitlement) =>
-          entitlement.credit_type
+  /*
+   * If the customer arrived from a specific
+   * entitlement on the Plans page, this is
+   * the exact access we want to use.
+   */
+  const selectedEntitlement =
+    useMemo(() => {
+      if (!requestedEntitlement) {
+        return null
+      }
+
+      return (
+        validEntitlements.find(
+          (entitlement) =>
+            entitlement.id ===
+            requestedEntitlement
+        ) || null
       )
-    ),
-  ]
+    }, [
+      validEntitlements,
+      requestedEntitlement,
+    ])
+
+  /*
+   * If a specific entitlement was requested,
+   * only its service type is available.
+   *
+   * Otherwise preserve the normal combined
+   * access behavior.
+   */
+  const availableTypes =
+    selectedEntitlement
+      ? [
+          selectedEntitlement.credit_type,
+        ]
+      : [
+          ...new Set(
+            validEntitlements.map(
+              (entitlement) =>
+                entitlement.credit_type
+            )
+          ),
+        ]
+
+  /*
+   * If Plans sent us a specific entitlement
+   * but no type, automatically use that
+   * entitlement's type.
+   */
+  useEffect(() => {
+    if (
+      selectedEntitlement &&
+      !filter
+    ) {
+      setFilter(
+        selectedEntitlement.credit_type
+      )
+    }
+  }, [selectedEntitlement, filter])
 
   const eligibleSessions =
     sessions.filter((session) => {
@@ -308,19 +305,21 @@ function BookingContent() {
     })
 
   /*
-   * When no filter is selected, show the
-   * combined access across eligible types.
+   * When a specific entitlement was selected,
+   * show ONLY that entitlement's balance.
    *
-   * When a specific type is selected, show
-   * only that type's balance.
+   * Otherwise show the combined balance for
+   * the selected training type.
    */
   const filteredEntitlements =
-    validEntitlements.filter(
-      (entitlement) =>
-        !filter ||
-        entitlement.credit_type ===
-          filter
-    )
+    selectedEntitlement
+      ? [selectedEntitlement]
+      : validEntitlements.filter(
+          (entitlement) =>
+            !filter ||
+            entitlement.credit_type ===
+              filter
+        )
 
   const unlimitedAccess =
     filteredEntitlements.some(
@@ -328,7 +327,7 @@ function BookingContent() {
         entitlement.unlimited
     )
 
-  const remainingSessions =
+  const remainingCredits =
     filteredEntitlements.reduce(
       (total, entitlement) =>
         total +
@@ -338,6 +337,81 @@ function BookingContent() {
         ),
       0
     )
+
+  const accessName =
+    selectedEntitlement?.packages?.name ||
+    (filter
+      ? label(filter)
+      : 'Training Access')
+
+  async function book(sessionId) {
+    if (!athlete) {
+      setMsg(
+        'Add or select an athlete first.'
+      )
+      return
+    }
+
+    /*
+     * If the URL requested a specific
+     * entitlement but it is no longer valid
+     * for this athlete, don't silently fall
+     * back to another package.
+     */
+    if (
+      requestedEntitlement &&
+      !selectedEntitlement
+    ) {
+      setMsg(
+        'The selected training access is no longer available for this athlete. Return to Plans & Access and choose active training access.'
+      )
+      return
+    }
+
+    setMsg('')
+
+    const { error } =
+      await supabase().rpc(
+        'book_session_v15',
+        {
+          p_session_id: sessionId,
+          p_athlete_id: athlete,
+          p_entitlement_id:
+            selectedEntitlement?.id ||
+            null,
+        }
+      )
+
+    if (error) {
+      setMsg(error.message)
+      return
+    }
+
+    setMsg(
+      'Training booked successfully.'
+    )
+
+    await loadBase()
+
+    const { data } =
+      await supabase()
+        .from('bookings')
+        .select('session_id')
+        .eq(
+          'athlete_id',
+          athlete
+        )
+        .eq('status', 'booked')
+
+    setBooked(
+      new Set(
+        (data || []).map(
+          (booking) =>
+            booking.session_id
+        )
+      )
+    )
+  }
 
   return (
     <AppShell title="Book Training">
@@ -392,15 +466,22 @@ function BookingContent() {
 
           <select
             value={filter}
+            disabled={
+              Boolean(
+                selectedEntitlement
+              )
+            }
             onChange={(event) =>
               setFilter(
                 event.target.value
               )
             }
           >
-            <option value="">
-              All eligible training
-            </option>
+            {!selectedEntitlement && (
+              <option value="">
+                All eligible training
+              </option>
+            )}
 
             {availableTypes.map(
               (type) => (
@@ -416,21 +497,21 @@ function BookingContent() {
         </label>
       </div>
 
-      {filter && (
+      {(filter ||
+        selectedEntitlement) && (
         <div className="accessBanner">
           <b>
-            Using: {label(filter)}
+            Using: {accessName}
           </b>
 
           <span>
             {unlimitedAccess
               ? 'Unlimited active access'
-              : `${remainingSessions} ${
-                  remainingSessions ===
-                  1
-                    ? 'session'
-                    : 'sessions'
-                } available`}
+              : `${remainingCredits} ${
+                  remainingCredits === 1
+                    ? 'credit'
+                    : 'credits'
+                } remaining`}
           </span>
         </div>
       )}
