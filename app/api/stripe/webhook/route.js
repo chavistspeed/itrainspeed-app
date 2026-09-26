@@ -198,6 +198,8 @@ async function fulfillCheckout(
       'unlimited' ||
     packageData.access_type ===
       'promotion' ||
+    packageData.access_type ===
+      'membership' ||
     credits === 0
 
   const durationDays =
@@ -232,38 +234,34 @@ async function fulfillCheckout(
   }
 
   /*
-   * Track memberships belong to one
-   * specific athlete.
+   * Determine whether this entitlement belongs
+   * to the family or to one specific athlete.
+   *
+   * Track memberships are athlete-specific.
+   * Group memberships such as the Founding
+   * Athlete Membership are also athlete-specific.
    */
+  const requiresAthlete =
+    creditType === 'track' ||
+    (
+      creditType === 'group' &&
+      packageData.access_type ===
+        'membership'
+    )
+
   if (
-    creditType === 'track' &&
+    requiresAthlete &&
     !athleteId
   ) {
     throw new Error(
-      'Track membership is missing its athlete.'
+      'Athlete-specific membership is missing its athlete.'
     )
   }
 
-  const requiresAthlete =
-  creditType === 'track' ||
-  (
-    creditType === 'group' &&
-    packageData.access_type === 'membership'
-  )
-
-if (
-  requiresAthlete &&
-  !athleteId
-) {
-  throw new Error(
-    'Athlete-specific membership is missing its athlete.'
-  )
-}
-
-const entitlementAthleteId =
-  requiresAthlete
-    ? athleteId
-    : null
+  const entitlementAthleteId =
+    requiresAthlete
+      ? athleteId
+      : null
 
   const hasPurchaseLimit =
     packageData.purchase_limit !==
@@ -275,7 +273,7 @@ const entitlementAthleteId =
   /*
    * LIMITED PACKAGE
    *
-   * The database locks the package row,
+   * PostgreSQL locks the package row,
    * counts successful purchases, and
    * atomically decides whether inventory
    * remains.
@@ -309,8 +307,9 @@ const entitlementAthleteId =
 
         p_payment_intent_id:
           paymentIntentId,
-        p_subscription_id: subscriptionId,
 
+        p_subscription_id:
+          subscriptionId,
 
         p_customer_id:
           customerId,
@@ -325,13 +324,11 @@ const entitlementAthleteId =
        * Rare race condition:
        *
        * Two customers may enter Stripe
-       * Checkout while one promo spot is
+       * Checkout while one limited spot is
        * still available.
        *
-       * If both successfully pay, PostgreSQL
-       * allows only the first fulfillment.
-       * The other payment is automatically
-       * refunded here.
+       * PostgreSQL allows only the first
+       * successful fulfillment.
        */
       if (
         isPromoSoldOutError(
@@ -497,16 +494,53 @@ async function syncSubscription(
   admin,
   subscription
 ) {
+  const subscriptionId =
+    subscription.id
+
+  if (!subscriptionId) return
+
+  /*
+   * IMPORTANT BILLING RULE:
+   *
+   * Only terminal Stripe subscription states
+   * revoke training access.
+   *
+   * Failed invoices and retry/dunning states
+   * should not immediately remove an athlete's
+   * access while Stripe is still attempting to
+   * collect payment.
+   */
+  const terminalStatuses = [
+    'canceled',
+    'unpaid',
+    'incomplete_expired',
+  ]
+
+  if (
+    terminalStatuses.includes(
+      subscription.status
+    )
+  ) {
+    await deactivateSubscription(
+      admin,
+      subscriptionId
+    )
+
+    return
+  }
+
+  /*
+   * Clearly active subscriptions should have
+   * an active iTrainSpeed entitlement.
+   *
+   * This also restores access after a
+   * successful payment recovery.
+   */
   const activeStatuses = [
     'active',
     'trialing',
   ]
 
-  /*
-   * A subscription scheduled to cancel at
-   * period end remains active until that
-   * paid period actually finishes.
-   */
   if (
     activeStatuses.includes(
       subscription.status
@@ -520,26 +554,25 @@ async function syncSubscription(
     return
   }
 
-  if (
-    [
-      'canceled',
-      'unpaid',
-      'incomplete_expired',
-    ].includes(
-      subscription.status
-    )
-  ) {
-    await deactivateSubscription(
-      admin,
-      subscription.id
-    )
-  }
-
   /*
-   * Do not revoke access immediately for
-   * past_due subscriptions. Stripe may
-   * still be retrying payment.
+   * All other non-terminal states are preserved.
+   *
+   * Examples can include payment retry/dunning
+   * states. We intentionally do NOT change the
+   * entitlement status here.
    */
+  const { error } = await admin
+    .from('entitlements')
+    .update({
+      updated_at:
+        new Date().toISOString(),
+    })
+    .eq(
+      'stripe_subscription_id',
+      subscriptionId
+    )
+
+  if (error) throw error
 }
 
 async function handleInvoicePaid(
@@ -555,6 +588,13 @@ async function handleInvoicePaid(
 
   if (!subscriptionId) return
 
+  /*
+   * A successful subscription invoice restores
+   * or maintains the existing entitlement.
+   *
+   * We update the existing row rather than
+   * creating another entitlement.
+   */
   const { error } = await admin
     .from('entitlements')
     .update({
@@ -585,8 +625,11 @@ async function handleInvoicePaymentFailed(
   if (!subscriptionId) return
 
   /*
-   * First failed renewal does not
-   * immediately revoke access.
+   * A failed renewal does NOT immediately
+   * revoke access.
+   *
+   * Stripe may still retry the payment or the
+   * customer may replace their payment method.
    */
   const { error } = await admin
     .from('entitlements')
@@ -669,6 +712,10 @@ export async function POST(
   const admin = createAdmin()
 
   try {
+    /*
+     * Prevent duplicate Stripe webhook
+     * deliveries from being processed twice.
+     */
     if (
       await eventAlreadyProcessed(
         admin,
@@ -698,6 +745,10 @@ export async function POST(
         break
 
       case 'customer.subscription.deleted':
+        /*
+         * Stripe has actually terminated the
+         * subscription. Access should now end.
+         */
         await deactivateSubscription(
           admin,
           event.data.object.id
@@ -705,6 +756,10 @@ export async function POST(
         break
 
       case 'invoice.paid':
+        /*
+         * Successful initial/renewal/recovery
+         * payment keeps the entitlement active.
+         */
         await handleInvoicePaid(
           admin,
           event.data.object
@@ -712,6 +767,10 @@ export async function POST(
         break
 
       case 'invoice.payment_failed':
+        /*
+         * Do not revoke access merely because
+         * an invoice payment failed.
+         */
         await handleInvoicePaymentFailed(
           admin,
           event.data.object
@@ -738,8 +797,7 @@ export async function POST(
 
     /*
      * Returning non-2xx tells Stripe that
-     * processing failed and should be
-     * retried.
+     * processing failed and should be retried.
      */
     return new Response(
       'Webhook processing failed.',
