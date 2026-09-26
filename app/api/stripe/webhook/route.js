@@ -6,9 +6,11 @@ export const dynamic = 'force-dynamic'
 
 function addDays(date, days) {
   const result = new Date(date)
+
   result.setUTCDate(
     result.getUTCDate() + Number(days || 0)
   )
+
   return result.toISOString()
 }
 
@@ -59,8 +61,62 @@ async function markEventProcessed(
   }
 }
 
+function isPromoSoldOutError(error) {
+  const message =
+    error?.message ||
+    error?.details ||
+    ''
+
+  return String(message).includes(
+    'PROMO_SOLD_OUT'
+  )
+}
+
+async function refundSoldOutCheckout(
+  stripe,
+  session
+) {
+  const paymentIntentId =
+    typeof session.payment_intent ===
+    'string'
+      ? session.payment_intent
+      : session.payment_intent?.id ||
+        null
+
+  if (!paymentIntentId) {
+    throw new Error(
+      'Limited package sold out, but no PaymentIntent was available to refund.'
+    )
+  }
+
+  /*
+   * Stripe idempotency prevents duplicate
+   * refunds if this webhook is delivered
+   * more than once.
+   */
+  await stripe.refunds.create(
+    {
+      payment_intent:
+        paymentIntentId,
+
+      metadata: {
+        reason:
+          'itrainspeed_limited_package_sold_out',
+
+        checkout_session_id:
+          session.id,
+      },
+    },
+    {
+      idempotencyKey:
+        `sold-out-${session.id}`,
+    }
+  )
+}
+
 async function fulfillCheckout(
   admin,
+  stripe,
   session
 ) {
   const packageId =
@@ -70,9 +126,13 @@ async function fulfillCheckout(
     session.metadata?.guardian_id
 
   const athleteId =
-    session.metadata?.athlete_id || null
+    session.metadata?.athlete_id ||
+    null
 
-  if (!packageId || !guardianId) {
+  if (
+    !packageId ||
+    !guardianId
+  ) {
     throw new Error(
       'Checkout session is missing iTrainSpeed metadata.'
     )
@@ -136,6 +196,8 @@ async function fulfillCheckout(
   const unlimited =
     packageData.access_type ===
       'unlimited' ||
+    packageData.access_type ===
+      'promotion' ||
     credits === 0
 
   const durationDays =
@@ -148,8 +210,8 @@ async function fulfillCheckout(
   let expiresAt = null
 
   /*
-   * One-time promotions may expire after
-   * their configured number of days.
+   * One-time promotions or packages may
+   * expire after their configured duration.
    */
   if (
     !isSubscription &&
@@ -162,15 +224,15 @@ async function fulfillCheckout(
   }
 
   /*
-   * Stripe controls the lifecycle of
-   * recurring subscriptions.
+   * Stripe controls recurring subscription
+   * lifecycle.
    */
   if (isSubscription) {
     expiresAt = null
   }
 
   /*
-   * Track memberships must belong to one
+   * Track memberships belong to one
    * specific athlete.
    */
   if (
@@ -187,58 +249,159 @@ async function fulfillCheckout(
       ? athleteId
       : null
 
+  const hasPurchaseLimit =
+    packageData.purchase_limit !==
+      null &&
+    Number(
+      packageData.purchase_limit
+    ) > 0
+
   /*
-   * Purchase + entitlement are created in
-   * one PostgreSQL transaction.
+   * LIMITED PACKAGE
+   *
+   * The database locks the package row,
+   * counts successful purchases, and
+   * atomically decides whether inventory
+   * remains.
    */
-  const {
-    error: fulfillmentError,
-  } = await admin.rpc(
-    'fulfill_stripe_checkout_v1',
-    {
-      p_guardian_id:
-        guardianId,
+  if (hasPurchaseLimit) {
+    const {
+      error: limitedFulfillmentError,
+    } = await admin.rpc(
+      'fulfill_limited_promo_checkout_v1',
+      {
+        p_guardian_id:
+          guardianId,
 
-      p_athlete_id:
-        entitlementAthleteId,
+        p_athlete_id:
+          entitlementAthleteId,
 
-      p_package_id:
-        packageData.id,
+        p_package_id:
+          packageData.id,
 
-      p_package_key:
-        packageData.name,
+        p_package_key:
+          packageData.name,
 
-      p_credit_type:
-        creditType,
+        p_credit_type:
+          creditType,
 
-      p_credits:
-        credits,
+        p_expires_at:
+          expiresAt,
 
-      p_unlimited:
-        unlimited,
+        p_checkout_session_id:
+          session.id,
 
-      p_expires_at:
-        expiresAt,
+        p_payment_intent_id:
+          paymentIntentId,
 
-      p_checkout_session_id:
-        session.id,
+        p_customer_id:
+          customerId,
 
-      p_payment_intent_id:
-        paymentIntentId,
+        p_amount_paid_cents:
+          amountPaid,
+      }
+    )
 
-      p_subscription_id:
-        subscriptionId,
+    if (limitedFulfillmentError) {
+      /*
+       * Rare race condition:
+       *
+       * Two customers may enter Stripe
+       * Checkout while one promo spot is
+       * still available.
+       *
+       * If both successfully pay, PostgreSQL
+       * allows only the first fulfillment.
+       * The other payment is automatically
+       * refunded here.
+       */
+      if (
+        isPromoSoldOutError(
+          limitedFulfillmentError
+        )
+      ) {
+        await refundSoldOutCheckout(
+          stripe,
+          session
+        )
 
-      p_customer_id:
-        customerId,
+        console.warn(
+          'Limited package sold out after payment. Payment automatically refunded.',
+          {
+            checkoutSessionId:
+              session.id,
 
-      p_amount_paid_cents:
-        amountPaid,
+            packageId:
+              packageData.id,
+
+            guardianId,
+          }
+        )
+
+        return {
+          refundedBecauseSoldOut:
+            true,
+        }
+      }
+
+      throw limitedFulfillmentError
     }
-  )
+  } else {
+    /*
+     * Normal package fulfillment.
+     *
+     * Purchase + entitlement are created
+     * in one PostgreSQL transaction.
+     */
+    const {
+      error: fulfillmentError,
+    } = await admin.rpc(
+      'fulfill_stripe_checkout_v1',
+      {
+        p_guardian_id:
+          guardianId,
 
-  if (fulfillmentError) {
-    throw fulfillmentError
+        p_athlete_id:
+          entitlementAthleteId,
+
+        p_package_id:
+          packageData.id,
+
+        p_package_key:
+          packageData.name,
+
+        p_credit_type:
+          creditType,
+
+        p_credits:
+          credits,
+
+        p_unlimited:
+          unlimited,
+
+        p_expires_at:
+          expiresAt,
+
+        p_checkout_session_id:
+          session.id,
+
+        p_payment_intent_id:
+          paymentIntentId,
+
+        p_subscription_id:
+          subscriptionId,
+
+        p_customer_id:
+          customerId,
+
+        p_amount_paid_cents:
+          amountPaid,
+      }
+    )
+
+    if (fulfillmentError) {
+      throw fulfillmentError
+    }
   }
 
   /*
@@ -255,6 +418,11 @@ async function fulfillCheckout(
       .eq('id', guardianId)
 
     if (error) throw error
+  }
+
+  return {
+    refundedBecauseSoldOut:
+      false,
   }
 }
 
@@ -317,11 +485,8 @@ async function syncSubscription(
   ]
 
   /*
-   * Keep access active for active/trialing
-   * subscriptions.
-   *
-   * A subscription set to cancel at period
-   * end normally remains "active" until the
+   * A subscription scheduled to cancel at
+   * period end remains active until that
    * paid period actually finishes.
    */
   if (
@@ -337,9 +502,6 @@ async function syncSubscription(
     return
   }
 
-  /*
-   * These statuses should not retain access.
-   */
   if (
     [
       'canceled',
@@ -356,11 +518,9 @@ async function syncSubscription(
   }
 
   /*
-   * We intentionally do not immediately
-   * deactivate "past_due" here. Stripe may
-   * still be retrying the customer's card.
-   * invoice.payment_failed is recorded below
-   * without instantly removing access.
+   * Do not revoke access immediately for
+   * past_due subscriptions. Stripe may
+   * still be retrying payment.
    */
 }
 
@@ -377,11 +537,6 @@ async function handleInvoicePaid(
 
   if (!subscriptionId) return
 
-  /*
-   * A successful recurring invoice confirms
-   * the subscription is paid and access can
-   * remain active.
-   */
   const { error } = await admin
     .from('entitlements')
     .update({
@@ -412,13 +567,8 @@ async function handleInvoicePaymentFailed(
   if (!subscriptionId) return
 
   /*
-   * Do not immediately revoke access after
-   * the first failed renewal. Stripe may
-   * retry the payment.
-   *
-   * We update the timestamp so we have a
-   * record that the entitlement was touched
-   * by the billing lifecycle.
+   * First failed renewal does not
+   * immediately revoke access.
    */
   const { error } = await admin
     .from('entitlements')
@@ -517,6 +667,7 @@ export async function POST(
       case 'checkout.session.completed':
         await fulfillCheckout(
           admin,
+          stripe,
           event.data.object
         )
         break
@@ -568,8 +719,9 @@ export async function POST(
     )
 
     /*
-     * Non-2xx tells Stripe that processing
-     * failed so Stripe can retry delivery.
+     * Returning non-2xx tells Stripe that
+     * processing failed and should be
+     * retried.
      */
     return new Response(
       'Webhook processing failed.',
