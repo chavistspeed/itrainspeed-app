@@ -1,6 +1,11 @@
 'use client'
 
-import { Suspense, useEffect, useMemo, useState } from 'react'
+import {
+  Suspense,
+  useEffect,
+  useMemo,
+  useState,
+} from 'react'
 import { useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import AppShell from '../../components/AppShell'
@@ -12,21 +17,39 @@ const label = (type) =>
     private: 'Private Training',
     track: 'Track & Field',
     recovery: 'Recovery',
-  }[type] || type)
+  }[type] ||
+  type ||
+  'Training')
 
 function BookingContent() {
   const params = useSearchParams()
 
-  const requestedType = params.get('type') || ''
-  const requestedAthlete = params.get('athlete') || ''
+  const requestedType =
+    params.get('type') || ''
 
-  const [athletes, setAthletes] = useState([])
-  const [sessions, setSessions] = useState([])
-  const [ents, setEnts] = useState([])
-  const [booked, setBooked] = useState(new Set())
-  const [athlete, setAthlete] = useState(requestedAthlete)
-  const [filter, setFilter] = useState(requestedType)
-  const [msg, setMsg] = useState('')
+  const requestedAthlete =
+    params.get('athlete') || ''
+
+  const [athletes, setAthletes] =
+    useState([])
+
+  const [sessions, setSessions] =
+    useState([])
+
+  const [ents, setEnts] =
+    useState([])
+
+  const [booked, setBooked] =
+    useState(new Set())
+
+  const [athlete, setAthlete] =
+    useState(requestedAthlete)
+
+  const [filter, setFilter] =
+    useState(requestedType)
+
+  const [msg, setMsg] =
+    useState('')
 
   async function loadBase() {
     const s = supabase()
@@ -37,29 +60,36 @@ function BookingContent() {
 
     if (!user) return
 
-    const [{ data: athleteData }, { data: sessionData }, { data: entitlementData }] =
-      await Promise.all([
-        s
-          .from('athletes')
-          .select('*')
-          .eq('guardian_id', user.id)
-          .order('first_name'),
+    const [
+      { data: athleteData },
+      { data: sessionData },
+      { data: entitlementData },
+    ] = await Promise.all([
+      s
+        .from('athletes')
+        .select('*')
+        .eq('guardian_id', user.id)
+        .order('first_name'),
 
-        s
-          .from('session_availability')
-          .select('*')
-          .gte('start_at', new Date().toISOString())
-          .order('start_at')
-          .limit(80),
+      s
+        .from('session_availability')
+        .select('*')
+        .gte(
+          'start_at',
+          new Date().toISOString()
+        )
+        .order('start_at')
+        .limit(80),
 
-        s
-          .from('entitlements')
-          .select('*')
-          .eq('guardian_id', user.id)
-          .eq('status', 'active'),
-      ])
+      s
+        .from('entitlements')
+        .select('*')
+        .eq('guardian_id', user.id)
+        .eq('status', 'active'),
+    ])
 
-    const athleteList = athleteData || []
+    const athleteList =
+      athleteData || []
 
     setAthletes(athleteList)
     setSessions(sessionData || [])
@@ -85,113 +115,229 @@ function BookingContent() {
         return
       }
 
-      const { data } = await supabase()
-        .from('bookings')
-        .select('session_id')
-        .eq('athlete_id', athlete)
-        .eq('status', 'booked')
+      const { data } =
+        await supabase()
+          .from('bookings')
+          .select('session_id')
+          .eq(
+            'athlete_id',
+            athlete
+          )
+          .eq('status', 'booked')
 
       setBooked(
-        new Set((data || []).map((booking) => booking.session_id))
+        new Set(
+          (data || []).map(
+            (booking) =>
+              booking.session_id
+          )
+        )
       )
     }
 
     loadBooked()
   }, [athlete])
 
+  /*
+   * V1.5 service-type compatibility.
+   *
+   * Programs now use service_type as the
+   * authoritative field.
+   *
+   * Older database views may still expose
+   * credit_type, so we support both while
+   * service_type takes priority.
+   */
+  function sessionServiceType(session) {
+    return (
+      session.service_type ||
+      session.credit_type ||
+      ''
+    )
+  }
+
   async function book(sessionId) {
     if (!athlete) {
-      setMsg('Add or select an athlete first.')
+      setMsg(
+        'Add or select an athlete first.'
+      )
       return
     }
 
     setMsg('')
 
-    const { error } = await supabase().rpc('book_session_v14', {
-      p_session_id: sessionId,
-      p_athlete_id: athlete,
-    })
+    const { error } =
+      await supabase().rpc(
+        'book_session_v14',
+        {
+          p_session_id: sessionId,
+          p_athlete_id: athlete,
+        }
+      )
 
     if (error) {
       setMsg(error.message)
       return
     }
 
-    setMsg('Training booked successfully.')
+    setMsg(
+      'Training booked successfully.'
+    )
 
     await loadBase()
 
-    const { data } = await supabase()
-      .from('bookings')
-      .select('session_id')
-      .eq('athlete_id', athlete)
-      .eq('status', 'booked')
+    const { data } =
+      await supabase()
+        .from('bookings')
+        .select('session_id')
+        .eq(
+          'athlete_id',
+          athlete
+        )
+        .eq('status', 'booked')
 
     setBooked(
-      new Set((data || []).map((booking) => booking.session_id))
+      new Set(
+        (data || []).map(
+          (booking) =>
+            booking.session_id
+        )
+      )
     )
   }
 
-  const selectedAthlete = athletes.find(
-    (item) => item.id === athlete
-  )
+  const selectedAthlete =
+    athletes.find(
+      (item) =>
+        item.id === athlete
+    )
 
-  const validEntitlements = useMemo(() => {
-    return ents.filter((entitlement) => {
-      const notExpired =
-        !entitlement.expires_at ||
-        new Date(entitlement.expires_at) > new Date()
+  const validEntitlements =
+    useMemo(() => {
+      return ents.filter(
+        (entitlement) => {
+          const notExpired =
+            !entitlement.expires_at ||
+            new Date(
+              entitlement.expires_at
+            ) > new Date()
 
-      const hasAccess =
-        entitlement.unlimited ||
-        Number(entitlement.credits_remaining) > 0
+          const hasAccess =
+            entitlement.unlimited ||
+            Number(
+              entitlement.credits_remaining
+            ) > 0
 
-      // Family Group/Private credits have no athlete_id.
-      // Athlete-specific memberships, such as Track, must match.
-      const belongsToAthlete =
-        !entitlement.athlete_id ||
-        entitlement.athlete_id === athlete
+          /*
+           * Group and private credits are
+           * family-shared and therefore
+           * normally have no athlete_id.
+           *
+           * Athlete-specific access such as
+           * Track must match the athlete.
+           */
+          const belongsToAthlete =
+            !entitlement.athlete_id ||
+            entitlement.athlete_id ===
+              athlete
 
-      return notExpired && hasAccess && belongsToAthlete
-    })
-  }, [ents, athlete])
+          return (
+            notExpired &&
+            hasAccess &&
+            belongsToAthlete
+          )
+        }
+      )
+    }, [ents, athlete])
 
   const availableTypes = [
     ...new Set(
       validEntitlements.map(
-        (entitlement) => entitlement.credit_type
+        (entitlement) =>
+          entitlement.credit_type
       )
     ),
   ]
 
-  const eligibleSessions = sessions.filter((session) => {
-    const ageEligible =
-      !selectedAthlete?.age ||
-      (selectedAthlete.age >= session.min_age &&
-        selectedAthlete.age <= session.max_age)
+  const eligibleSessions =
+    sessions.filter((session) => {
+      const serviceType =
+        sessionServiceType(session)
 
-    const matchesFilter =
-      !filter || session.credit_type === filter
+      const minAge =
+        Number(session.min_age)
 
-    const hasCorrectAccess =
-      availableTypes.includes(session.credit_type)
+      const maxAge =
+        Number(session.max_age)
 
-    return ageEligible && matchesFilter && hasCorrectAccess
-  })
+      const athleteAge =
+        Number(selectedAthlete?.age)
 
-  const filteredEntitlements = validEntitlements.filter(
-    (entitlement) => entitlement.credit_type === filter
-  )
+      const hasAthleteAge =
+        Number.isFinite(
+          athleteAge
+        ) && athleteAge > 0
 
-  const unlimitedAccess = filteredEntitlements.some(
-    (entitlement) => entitlement.unlimited
-  )
+      const hasMinimum =
+        Number.isFinite(minAge)
 
-  const remainingSessions = filteredEntitlements.reduce(
-    (total, entitlement) =>
-      total + Number(entitlement.credits_remaining || 0),
-    0
-  )
+      const hasMaximum =
+        Number.isFinite(maxAge)
+
+      const ageEligible =
+        !hasAthleteAge ||
+        ((!hasMinimum ||
+          athleteAge >= minAge) &&
+          (!hasMaximum ||
+            athleteAge <= maxAge))
+
+      const matchesFilter =
+        !filter ||
+        serviceType === filter
+
+      const hasCorrectAccess =
+        availableTypes.includes(
+          serviceType
+        )
+
+      return (
+        ageEligible &&
+        matchesFilter &&
+        hasCorrectAccess
+      )
+    })
+
+  /*
+   * When no filter is selected, show the
+   * combined access across eligible types.
+   *
+   * When a specific type is selected, show
+   * only that type's balance.
+   */
+  const filteredEntitlements =
+    validEntitlements.filter(
+      (entitlement) =>
+        !filter ||
+        entitlement.credit_type ===
+          filter
+    )
+
+  const unlimitedAccess =
+    filteredEntitlements.some(
+      (entitlement) =>
+        entitlement.unlimited
+    )
+
+  const remainingSessions =
+    filteredEntitlements.reduce(
+      (total, entitlement) =>
+        total +
+        Number(
+          entitlement.credits_remaining ||
+            0
+        ),
+      0
+    )
 
   return (
     <AppShell title="Book Training">
@@ -200,12 +346,15 @@ function BookingContent() {
           <h1>Book training</h1>
 
           <p className="subtle">
-            Only sessions your athlete can book with active
-            credits or memberships are shown.
+            Only sessions your athlete
+            can book with active credits
+            or memberships are shown.
           </p>
         </div>
 
-        <Link href="/plans">View my access</Link>
+        <Link href="/plans">
+          View my access
+        </Link>
       </div>
 
       <div className="bookingFilters">
@@ -215,16 +364,26 @@ function BookingContent() {
           <select
             value={athlete}
             onChange={(event) =>
-              setAthlete(event.target.value)
+              setAthlete(
+                event.target.value
+              )
             }
           >
-            <option value="">Select athlete</option>
+            <option value="">
+              Select athlete
+            </option>
 
-            {athletes.map((item) => (
-              <option key={item.id} value={item.id}>
-                {item.first_name} {item.last_name}
-              </option>
-            ))}
+            {athletes.map(
+              (item) => (
+                <option
+                  key={item.id}
+                  value={item.id}
+                >
+                  {item.first_name}{' '}
+                  {item.last_name}
+                </option>
+              )
+            )}
           </select>
         </label>
 
@@ -234,93 +393,145 @@ function BookingContent() {
           <select
             value={filter}
             onChange={(event) =>
-              setFilter(event.target.value)
+              setFilter(
+                event.target.value
+              )
             }
           >
             <option value="">
               All eligible training
             </option>
 
-            {availableTypes.map((type) => (
-              <option key={type} value={type}>
-                {label(type)}
-              </option>
-            ))}
+            {availableTypes.map(
+              (type) => (
+                <option
+                  key={type}
+                  value={type}
+                >
+                  {label(type)}
+                </option>
+              )
+            )}
           </select>
         </label>
       </div>
 
       {filter && (
         <div className="accessBanner">
-          <b>Using: {label(filter)}</b>
+          <b>
+            Using: {label(filter)}
+          </b>
 
           <span>
             {unlimitedAccess
               ? 'Unlimited active access'
-              : `${remainingSessions} sessions available`}
+              : `${remainingSessions} ${
+                  remainingSessions ===
+                  1
+                    ? 'session'
+                    : 'sessions'
+                } available`}
           </span>
         </div>
       )}
 
-      {msg && <div className="notice">{msg}</div>}
+      {msg && (
+        <div className="notice">
+          {msg}
+        </div>
+      )}
 
       <div className="sessions">
-        {eligibleSessions.map((session) => {
-          const full =
-            session.booked_count >= session.capacity
+        {eligibleSessions.map(
+          (session) => {
+            const serviceType =
+              sessionServiceType(
+                session
+              )
 
-          const isBooked = booked.has(session.id)
+            const full =
+              Number(
+                session.booked_count
+              ) >=
+              Number(
+                session.capacity
+              )
 
-          return (
-            <article
-              className="session card"
-              key={session.id}
-            >
-              <div>
-                <small>
-                  {(
-                    session.category ||
-                    label(session.credit_type) ||
-                    'TRAINING'
-                  ).toUpperCase()}
-                </small>
+            const isBooked =
+              booked.has(session.id)
 
-                <h3>{session.program_name}</h3>
-
-                <span>
-                  {new Date(
-                    session.start_at
-                  ).toLocaleString()}
-                </span>
-
-                <span>
-                  {session.location || 'iTrainSpeed'} •{' '}
-                  {session.duration_minutes} min
-                </span>
-
-                <span>
-                  {session.booked_count}/{session.capacity}{' '}
-                  booked • Eligible with{' '}
-                  {label(session.credit_type)}
-                </span>
-              </div>
-
-              <button
-                className={
-                  isBooked ? 'bookedBtn' : ''
-                }
-                disabled={full || isBooked}
-                onClick={() => book(session.id)}
+            return (
+              <article
+                className="session card"
+                key={session.id}
               >
-                {isBooked
-                  ? 'Booked'
-                  : full
-                    ? 'Full'
-                    : 'Book'}
-              </button>
-            </article>
-          )
-        })}
+                <div>
+                  <small>
+                    {(
+                      session.category ||
+                      label(
+                        serviceType
+                      ) ||
+                      'TRAINING'
+                    ).toUpperCase()}
+                  </small>
+
+                  <h3>
+                    {
+                      session.program_name
+                    }
+                  </h3>
+
+                  <span>
+                    {new Date(
+                      session.start_at
+                    ).toLocaleString()}
+                  </span>
+
+                  <span>
+                    {session.location ||
+                      'iTrainSpeed'}{' '}
+                    •{' '}
+                    {
+                      session.duration_minutes
+                    }{' '}
+                    min
+                  </span>
+
+                  <span>
+                    {
+                      session.booked_count
+                    }
+                    /{session.capacity}{' '}
+                    booked • Eligible with{' '}
+                    {label(serviceType)}
+                  </span>
+                </div>
+
+                <button
+                  className={
+                    isBooked
+                      ? 'bookedBtn'
+                      : ''
+                  }
+                  disabled={
+                    full ||
+                    isBooked
+                  }
+                  onClick={() =>
+                    book(session.id)
+                  }
+                >
+                  {isBooked
+                    ? 'Booked'
+                    : full
+                      ? 'Full'
+                      : 'Book'}
+                </button>
+              </article>
+            )
+          }
+        )}
 
         {!eligibleSessions.length && (
           <div className="empty">
@@ -340,6 +551,7 @@ function BookingContent() {
     </AppShell>
   )
 }
+
 export default function Booking() {
   return (
     <Suspense
@@ -347,9 +559,13 @@ export default function Booking() {
         <AppShell title="Book Training">
           <div className="pageTitleRow">
             <div>
-              <h1>Book training</h1>
+              <h1>
+                Book training
+              </h1>
+
               <p className="subtle">
-                Loading your available training...
+                Loading your available
+                training...
               </p>
             </div>
           </div>
