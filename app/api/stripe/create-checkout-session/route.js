@@ -20,9 +20,12 @@ export async function POST(request) {
       )
     }
 
-    const stripe = new Stripe(process.env.STRIPE_SECRET_KEY)
+    const stripe = new Stripe(
+      process.env.STRIPE_SECRET_KEY
+    )
 
-    const authHeader = request.headers.get('authorization')
+    const authHeader =
+      request.headers.get('authorization')
 
     if (!authHeader?.startsWith('Bearer ')) {
       return Response.json(
@@ -31,7 +34,8 @@ export async function POST(request) {
       )
     }
 
-    const token = authHeader.replace('Bearer ', '')
+    const token =
+      authHeader.replace('Bearer ', '')
 
     const supabaseAdmin = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL,
@@ -47,18 +51,29 @@ export async function POST(request) {
     const {
       data: { user },
       error: userError,
-    } = await supabaseAdmin.auth.getUser(token)
+    } =
+      await supabaseAdmin.auth.getUser(
+        token
+      )
 
     if (userError || !user) {
       return Response.json(
-        { error: 'Your session has expired. Please sign in again.' },
+        {
+          error:
+            'Your session has expired. Please sign in again.',
+        },
         { status: 401 }
       )
     }
 
-    const body = await request.json()
-    const packageId = body.package_id
-    const athleteId = body.athlete_id || null
+    const body =
+      await request.json()
+
+    const packageId =
+      body.package_id
+
+    const athleteId =
+      body.athlete_id || null
 
     if (!packageId) {
       return Response.json(
@@ -67,32 +82,50 @@ export async function POST(request) {
       )
     }
 
-    // Supabase is the source of truth for package pricing
-    // and entitlement configuration.
-    const { data: packageData, error: packageError } =
-      await supabaseAdmin
-        .from('packages')
-        .select('*')
-        .eq('id', packageId)
-        .eq('active', true)
-        .single()
+    /*
+     * Supabase is the source of truth for
+     * package pricing and entitlement
+     * configuration.
+     */
+    const {
+      data: packageData,
+      error: packageError,
+    } = await supabaseAdmin
+      .from('packages')
+      .select('*')
+      .eq('id', packageId)
+      .eq('active', true)
+      .single()
 
-    if (packageError || !packageData) {
+    if (
+      packageError ||
+      !packageData
+    ) {
       return Response.json(
-        { error: 'This package is no longer available.' },
+        {
+          error:
+            'This package is no longer available.',
+        },
         { status: 404 }
       )
     }
 
-    const creditType = packageData.credit_type
+    const creditType =
+      packageData.credit_type
 
     if (
-      !['group', 'private', 'track', 'recovery'].includes(
-        creditType
-      )
+      ![
+        'group',
+        'private',
+        'track',
+        'recovery',
+      ].includes(creditType)
     ) {
       return Response.json(
-        { error: 'This package has an invalid service type.' },
+        {
+          error:
+            'This package has an invalid service type.',
+        },
         { status: 400 }
       )
     }
@@ -102,14 +135,17 @@ export async function POST(request) {
      *
      * - Track memberships belong to one athlete.
      * - Group memberships belong to one athlete.
-     * - Normal Group credit packages remain family-shared.
-     * - Private credit packages remain family-shared.
+     * - Normal Group credit packages are
+     *   family-shared.
+     * - Private credit packages are
+     *   family-shared.
      */
     const requiresAthlete =
       creditType === 'track' ||
       (
         creditType === 'group' &&
-        packageData.access_type === 'membership'
+        packageData.access_type ===
+          'membership'
       )
 
     if (requiresAthlete) {
@@ -123,15 +159,20 @@ export async function POST(request) {
         )
       }
 
-      const { data: athlete, error: athleteError } =
-        await supabaseAdmin
-          .from('athletes')
-          .select('id, guardian_id')
-          .eq('id', athleteId)
-          .eq('guardian_id', user.id)
-          .single()
+      const {
+        data: athlete,
+        error: athleteError,
+      } = await supabaseAdmin
+        .from('athletes')
+        .select('id, guardian_id')
+        .eq('id', athleteId)
+        .eq('guardian_id', user.id)
+        .single()
 
-      if (athleteError || !athlete) {
+      if (
+        athleteError ||
+        !athlete
+      ) {
         return Response.json(
           {
             error:
@@ -143,30 +184,132 @@ export async function POST(request) {
     }
 
     const entitlementAthleteId =
-      requiresAthlete ? athleteId : null
+      requiresAthlete
+        ? athleteId
+        : null
 
     /*
-     * Limited-package pre-check.
+     * DUPLICATE ATHLETE MEMBERSHIP PROTECTION
      *
-     * This prevents a customer from entering Stripe Checkout
-     * when the package is already sold out.
+     * An athlete cannot purchase the same
+     * athlete-specific membership while an
+     * active entitlement already exists.
      *
-     * Final concurrency protection happens during webhook
-     * fulfillment inside PostgreSQL.
+     * This check happens BEFORE Stripe Checkout
+     * is created so the customer cannot
+     * accidentally pay for a duplicate
+     * subscription.
+     *
+     * Cancelled or expired memberships do not
+     * block a future purchase.
      */
     if (
-      packageData.purchase_limit !== null &&
-      Number(packageData.purchase_limit) > 0
+      requiresAthlete &&
+      packageData.access_type ===
+        'membership'
     ) {
-      const { count, error: countError } =
-        await supabaseAdmin
-          .from('purchases')
-          .select('id', {
-            count: 'exact',
-            head: true,
-          })
-          .eq('package_id', packageData.id)
-          .eq('status', 'paid')
+      const now =
+        new Date().toISOString()
+
+      const {
+        data: existingEntitlements,
+        error:
+          existingEntitlementError,
+      } = await supabaseAdmin
+        .from('entitlements')
+        .select(
+          'id, status, expires_at, stripe_subscription_id'
+        )
+        .eq(
+          'guardian_id',
+          user.id
+        )
+        .eq(
+          'athlete_id',
+          entitlementAthleteId
+        )
+        .eq(
+          'package_id',
+          packageData.id
+        )
+        .eq(
+          'status',
+          'active'
+        )
+
+      if (existingEntitlementError) {
+        console.error(
+          'Existing membership check failed:',
+          existingEntitlementError
+        )
+
+        return Response.json(
+          {
+            error:
+              'Unable to verify the athlete’s current membership. Please try again.',
+          },
+          { status: 500 }
+        )
+      }
+
+      const hasActiveMembership =
+        (
+          existingEntitlements || []
+        ).some(
+          (entitlement) =>
+            !entitlement.expires_at ||
+            entitlement.expires_at >
+              now
+        )
+
+      if (hasActiveMembership) {
+        return Response.json(
+          {
+            error:
+              `${packageData.name} is already active for this athlete.`,
+            code:
+              'ATHLETE_ALREADY_ENROLLED',
+          },
+          { status: 409 }
+        )
+      }
+    }
+
+    /*
+     * LIMITED PACKAGE PRE-CHECK
+     *
+     * Prevent customers from entering Stripe
+     * Checkout after all limited spots have
+     * already been purchased.
+     *
+     * The database remains the final
+     * concurrency protection during webhook
+     * fulfillment.
+     */
+    if (
+      packageData.purchase_limit !==
+        null &&
+      Number(
+        packageData.purchase_limit
+      ) > 0
+    ) {
+      const {
+        count,
+        error: countError,
+      } = await supabaseAdmin
+        .from('purchases')
+        .select('id', {
+          count: 'exact',
+          head: true,
+        })
+        .eq(
+          'package_id',
+          packageData.id
+        )
+        .eq(
+          'status',
+          'paid'
+        )
 
       if (countError) {
         console.error(
@@ -185,25 +328,34 @@ export async function POST(request) {
 
       if (
         (count || 0) >=
-        Number(packageData.purchase_limit)
+        Number(
+          packageData.purchase_limit
+        )
       ) {
         return Response.json(
           {
-            error: `${packageData.name} is sold out.`,
-            code: 'PACKAGE_SOLD_OUT',
+            error:
+              `${packageData.name} is sold out.`,
+            code:
+              'PACKAGE_SOLD_OUT',
           },
           { status: 409 }
         )
       }
     }
 
-    // Reuse the parent's Stripe customer.
-    const { data: profile, error: profileError } =
-      await supabaseAdmin
-        .from('profiles')
-        .select('stripe_customer_id')
-        .eq('id', user.id)
-        .single()
+    /*
+     * Reuse the parent's existing Stripe
+     * customer whenever possible.
+     */
+    const {
+      data: profile,
+      error: profileError,
+    } = await supabaseAdmin
+      .from('profiles')
+      .select('stripe_customer_id')
+      .eq('id', user.id)
+      .single()
 
     if (profileError) {
       console.error(
@@ -213,25 +365,34 @@ export async function POST(request) {
     }
 
     let stripeCustomerId =
-      profile?.stripe_customer_id || null
+      profile?.stripe_customer_id ||
+      null
 
     if (!stripeCustomerId) {
-      const customer = await stripe.customers.create({
-        email: user.email || undefined,
-        metadata: {
-          guardian_id: user.id,
-        },
-      })
+      const customer =
+        await stripe.customers.create({
+          email:
+            user.email ||
+            undefined,
 
-      stripeCustomerId = customer.id
+          metadata: {
+            guardian_id:
+              user.id,
+          },
+        })
 
-      const { error: customerSaveError } =
-        await supabaseAdmin
-          .from('profiles')
-          .update({
-            stripe_customer_id: stripeCustomerId,
-          })
-          .eq('id', user.id)
+      stripeCustomerId =
+        customer.id
+
+      const {
+        error: customerSaveError,
+      } = await supabaseAdmin
+        .from('profiles')
+        .update({
+          stripe_customer_id:
+            stripeCustomerId,
+        })
+        .eq('id', user.id)
 
       if (customerSaveError) {
         console.error(
@@ -243,32 +404,59 @@ export async function POST(request) {
 
     const origin =
       request.headers.get('origin') ||
-      `https://${request.headers.get('host')}`
+      `https://${request.headers.get(
+        'host'
+      )}`
 
     const isSubscription =
-      packageData.payment_type === 'subscription'
+      packageData.payment_type ===
+      'subscription'
 
     /*
-     * This metadata follows the purchase through Stripe and
-     * allows the webhook to create the correct entitlement.
+     * Metadata follows the purchase through
+     * Stripe and lets the webhook create the
+     * correct entitlement.
      */
     const metadata = {
-      package_id: String(packageData.id),
-      guardian_id: String(user.id),
-      credit_type: String(creditType),
-      athlete_id: entitlementAthleteId
-        ? String(entitlementAthleteId)
-        : '',
+      package_id:
+        String(packageData.id),
+
+      guardian_id:
+        String(user.id),
+
+      credit_type:
+        String(creditType),
+
+      athlete_id:
+        entitlementAthleteId
+          ? String(
+              entitlementAthleteId
+            )
+          : '',
     }
 
     const priceData = {
       currency: 'usd',
-      unit_amount: Number(packageData.price_cents),
+
+      unit_amount:
+        Number(
+          packageData.price_cents
+        ),
+
       product_data: {
-        name: packageData.name,
+        name:
+          packageData.name,
+
         metadata: {
-          package_id: String(packageData.id),
-          credit_type: String(creditType),
+          package_id:
+            String(
+              packageData.id
+            ),
+
+          credit_type:
+            String(
+              creditType
+            ),
         },
       },
     }
@@ -281,15 +469,19 @@ export async function POST(request) {
 
     const checkoutSession =
       await stripe.checkout.sessions.create({
-        mode: isSubscription
-          ? 'subscription'
-          : 'payment',
+        mode:
+          isSubscription
+            ? 'subscription'
+            : 'payment',
 
-        customer: stripeCustomerId,
+        customer:
+          stripeCustomerId,
 
         line_items: [
           {
-            price_data: priceData,
+            price_data:
+              priceData,
+
             quantity: 1,
           },
         ],
@@ -319,7 +511,10 @@ export async function POST(request) {
       url: checkoutSession.url,
     })
   } catch (error) {
-    console.error('Stripe checkout error:', error)
+    console.error(
+      'Stripe checkout error:',
+      error
+    )
 
     return Response.json(
       {
