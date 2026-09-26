@@ -18,6 +18,22 @@ const label = (t) =>
     recovery: 'Recovery',
   }[t] || t)
 
+/*
+ * Determines whether a package belongs to one athlete.
+ *
+ * Track access is athlete-specific.
+ * Group memberships such as Founding Athlete Membership
+ * are athlete-specific.
+ *
+ * Normal Group credit packages remain family-shared.
+ */
+const isAthleteSpecific = (p) =>
+  p?.credit_type === 'track' ||
+  (
+    p?.credit_type === 'group' &&
+    p?.access_type === 'membership'
+  )
+
 function PlansContent() {
   const searchParams = useSearchParams()
 
@@ -96,9 +112,6 @@ function PlansContent() {
         'Payment successful. Your training access is being activated.'
       )
 
-      // Stripe normally fulfills immediately,
-      // but the webhook may finish just after the
-      // customer returns from Checkout.
       const timer1 = setTimeout(() => {
         load()
       }, 1500)
@@ -123,12 +136,15 @@ function PlansContent() {
   async function purchase(p) {
     setMsg('')
 
+    const athleteSpecific =
+      isAthleteSpecific(p)
+
     if (
-      p.credit_type === 'track' &&
+      athleteSpecific &&
       !selectedAthlete
     ) {
       setMsg(
-        'Please select the athlete receiving the Track & Field membership.'
+        'Please select the athlete receiving this membership.'
       )
       return
     }
@@ -167,7 +183,7 @@ function PlansContent() {
             package_id: p.id,
 
             athlete_id:
-              p.credit_type === 'track'
+              athleteSpecific
                 ? selectedAthlete
                 : null,
           }),
@@ -207,17 +223,20 @@ function PlansContent() {
 
     setMsg('')
 
+    const athleteSpecific =
+      isAthleteSpecific(p)
+
     const athleteId =
-      p.credit_type === 'track'
+      athleteSpecific
         ? selectedAthlete || null
         : null
 
     if (
-      p.credit_type === 'track' &&
+      athleteSpecific &&
       !athleteId
     ) {
       setMsg(
-        'Select an athlete before granting Track access.'
+        'Select an athlete before granting athlete-specific access.'
       )
       return
     }
@@ -393,118 +412,127 @@ function PlansContent() {
       <section>
         <h2>Available plans</h2>
 
-        {packages.map((p) => (
-          <article
-            className="card packageCard"
-            key={p.id}
-          >
-            <div>
-              <small>
-                {(
-                  p.access_type ||
-                  'training'
-                ).toUpperCase()}{' '}
-                •{' '}
-                {label(
-                  p.credit_type
-                ).toUpperCase()}
-              </small>
+        {packages.map((p) => {
+          const athleteSpecific =
+            isAthleteSpecific(p)
 
-              <h3>{p.name}</h3>
+          return (
+            <article
+              className="card packageCard"
+              key={p.id}
+            >
+              <div>
+                <small>
+                  {(
+                    p.access_type ||
+                    'training'
+                  ).toUpperCase()}{' '}
+                  •{' '}
+                  {label(
+                    p.credit_type
+                  ).toUpperCase()}
+                </small>
 
-              {p.description && (
-                <span>
-                  {p.description}
-                </span>
-              )}
+                <h3>{p.name}</h3>
 
-              {p.purchase_limit && (
-                <span className="promoText">
-                  Limited to the first{' '}
-                  {p.purchase_limit}{' '}
-                  purchases
-                </span>
-              )}
-
-              <b className="packagePrice">
-                {money(
-                  p.price_cents
+                {p.description && (
+                  <span>
+                    {p.description}
+                  </span>
                 )}
-                {p.payment_type ===
-                'subscription'
-                  ? '/month'
-                  : ''}
-              </b>
 
-              {p.credit_type ===
-                'track' && (
-                <label>
-                  Athlete
-                  <select
-                    value={
-                      selectedAthlete
-                    }
-                    onChange={(e) =>
-                      setSelectedAthlete(
-                        e.target.value
-                      )
-                    }
-                    required
-                  >
-                    {athletes.length ? (
-                      athletes.map((a) => (
-                        <option
-                          key={a.id}
-                          value={a.id}
-                        >
-                          {a.first_name}{' '}
-                          {a.last_name}
+                {p.purchase_limit && (
+                  <span className="promoText">
+                    Limited to the first{' '}
+                    {p.purchase_limit}{' '}
+                    athletes
+                  </span>
+                )}
+
+                <b className="packagePrice">
+                  {money(
+                    p.price_cents
+                  )}
+                  {p.payment_type ===
+                  'subscription'
+                    ? '/month'
+                    : ''}
+                </b>
+
+                {athleteSpecific && (
+                  <label>
+                    Athlete
+                    <select
+                      value={
+                        selectedAthlete
+                      }
+                      onChange={(e) =>
+                        setSelectedAthlete(
+                          e.target.value
+                        )
+                      }
+                      required
+                    >
+                      {athletes.length ? (
+                        athletes.map((a) => (
+                          <option
+                            key={a.id}
+                            value={a.id}
+                          >
+                            {a.first_name}{' '}
+                            {a.last_name}
+                          </option>
+                        ))
+                      ) : (
+                        <option value="">
+                          Add an athlete first
                         </option>
-                      ))
-                    ) : (
-                      <option value="">
-                        Add an athlete first
-                      </option>
-                    )}
-                  </select>
-                </label>
-              )}
-            </div>
-
-            <div className="inlineActions">
-              <button
-                onClick={() =>
-                  purchase(p)
-                }
-                disabled={
-                  purchasing !== null ||
-                  (p.credit_type ===
-                    'track' &&
-                    !selectedAthlete)
-                }
-              >
-                {purchaseButtonText(
-                  p
+                      )}
+                    </select>
+                  </label>
                 )}
-              </button>
+              </div>
 
-              {profile?.role ===
-                'admin' && (
+              <div className="inlineActions">
                 <button
-                  className="secondary smallBtn"
                   onClick={() =>
-                    grant(p)
+                    purchase(p)
                   }
                   disabled={
-                    purchasing !== null
+                    purchasing !== null ||
+                    (
+                      athleteSpecific &&
+                      !selectedAthlete
+                    )
                   }
                 >
-                  Grant test access
+                  {purchaseButtonText(
+                    p
+                  )}
                 </button>
-              )}
-            </div>
-          </article>
-        ))}
+
+                {profile?.role ===
+                  'admin' && (
+                  <button
+                    className="secondary smallBtn"
+                    onClick={() =>
+                      grant(p)
+                    }
+                    disabled={
+                      purchasing !== null ||
+                      (
+                        athleteSpecific &&
+                        !selectedAthlete
+                      )
+                    }
+                  >
+                    Grant test access
+                  </button>
+                )}
+              </div>
+            </article>
+          )
+        })}
       </section>
     </AppShell>
   )
