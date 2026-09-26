@@ -216,14 +216,18 @@ function BookingContent() {
    * package without hard-coding package names.
    */
   const lockedAthleteId =
-    requestedEntitlementRecord?.athlete_id ||
-    ''
+  requestedEntitlementRecord?.athlete_id ||
+  requestedAthlete ||
+  ''
 
   const athleteLocked =
-    Boolean(
-      requestedEntitlement &&
-      lockedAthleteId
+  Boolean(
+    requestedEntitlement &&
+    (
+      lockedAthleteId ||
+      requestedAthlete
     )
+  )
 
   /*
    * Keep the selected athlete synchronized
@@ -502,42 +506,19 @@ function BookingContent() {
         <label>
           Booking for
 
-          {athleteLocked ? (
-            <>
-              <select
-                value={athlete}
-                disabled
-              >
-                {selectedAthlete ? (
-                  <option
-                    value={
-                      selectedAthlete.id
-                    }
-                  >
-                    {
-                      selectedAthlete.first_name
-                    }{' '}
-                    {
-                      selectedAthlete.last_name
-                    }
-                  </option>
-                ) : (
-                  <option
-                    value={
-                      lockedAthleteId
-                    }
-                  >
-                    Selected athlete
-                  </option>
-                )}
-              </select>
+{athleteLocked ? (
+  <div className="lockedBookingField">
+    <b>
+      {selectedAthlete
+        ? `${selectedAthlete.first_name} ${selectedAthlete.last_name || ''}`
+        : 'Selected athlete'}
+    </b>
 
-              <small>
-                This access belongs to this
-                athlete.
-              </small>
-            </>
-          ) : (
+    <small>
+      Athlete locked to this training access
+    </small>
+  </div>
+) : (
             <select
               value={athlete}
               onChange={(event) =>
