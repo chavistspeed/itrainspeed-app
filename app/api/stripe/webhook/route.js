@@ -295,7 +295,7 @@ async function deactivateSubscription(
   const { error } = await admin
     .from('entitlements')
     .update({
-      status: 'inactive',
+      status: 'cancelled',
       expires_at: now,
       updated_at: now,
     })
