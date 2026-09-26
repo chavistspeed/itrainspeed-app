@@ -653,7 +653,38 @@ export default function Coach() {
                   </label>
                 </div>
 
-                <div className="form2">
+          <div className="form2">
+  <label>
+    Credits per booking
+    <input
+      type="number"
+      min="0"
+      value={pf.credit_cost}
+      onChange={(e) =>
+        setPf({
+          ...pf,
+          credit_cost: e.target.value,
+        })
+      }
+    />
+  </label>
+
+  <label>
+    Single-session price ($)
+    <input
+      type="number"
+      min="0"
+      step="0.01"
+      value={pf.price_dollars}
+      onChange={(e) =>
+        setPf({
+          ...pf,
+          price_dollars: e.target.value,
+        })
+      }
+    />
+  </label>
+</div>
                   <label>
                     Credits per booking
                     <input
