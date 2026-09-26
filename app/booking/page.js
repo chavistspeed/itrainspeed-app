@@ -30,7 +30,6 @@ function BookingContent() {
   const requestedAthlete =
     params.get('athlete') || ''
 
-  // NEW: specific entitlement selected from Plans
   const requestedEntitlement =
     params.get('entitlement') || ''
 
@@ -105,12 +104,35 @@ function BookingContent() {
     const athleteList =
       athleteData || []
 
+    const entitlementList =
+      entitlementData || []
+
     setAthletes(athleteList)
     setSessions(sessionData || [])
-    setEnts(entitlementData || [])
+    setEnts(entitlementList)
+
+    /*
+     * If the customer arrived from a specific
+     * athlete-specific entitlement, that
+     * entitlement is the source of truth for
+     * which athlete is being booked.
+     */
+    const exactEntitlement =
+      requestedEntitlement
+        ? entitlementList.find(
+            (item) =>
+              item.id ===
+              requestedEntitlement
+          )
+        : null
+
+    const lockedAthleteId =
+      exactEntitlement?.athlete_id ||
+      ''
 
     setAthlete(
       (current) =>
+        lockedAthleteId ||
         current ||
         requestedAthlete ||
         athleteList?.[0]?.id ||
@@ -160,6 +182,66 @@ function BookingContent() {
     )
   }
 
+  /*
+   * Locate the requested entitlement directly
+   * from all active entitlements first.
+   *
+   * This allows us to determine whether the
+   * entitlement itself is athlete-specific.
+   */
+  const requestedEntitlementRecord =
+    useMemo(() => {
+      if (!requestedEntitlement) {
+        return null
+      }
+
+      return (
+        ents.find(
+          (entitlement) =>
+            entitlement.id ===
+            requestedEntitlement
+        ) || null
+      )
+    }, [
+      ents,
+      requestedEntitlement,
+    ])
+
+  /*
+   * An entitlement is athlete-locked whenever
+   * it has an athlete_id.
+   *
+   * This automatically supports Founding,
+   * Track, and any future athlete-specific
+   * package without hard-coding package names.
+   */
+  const lockedAthleteId =
+    requestedEntitlementRecord?.athlete_id ||
+    ''
+
+  const athleteLocked =
+    Boolean(
+      requestedEntitlement &&
+      lockedAthleteId
+    )
+
+  /*
+   * Keep the selected athlete synchronized
+   * with an athlete-specific entitlement.
+   */
+  useEffect(() => {
+    if (
+      athleteLocked &&
+      athlete !== lockedAthleteId
+    ) {
+      setAthlete(lockedAthleteId)
+    }
+  }, [
+    athleteLocked,
+    lockedAthleteId,
+    athlete,
+  ])
+
   const selectedAthlete =
     athletes.find(
       (item) =>
@@ -196,11 +278,6 @@ function BookingContent() {
       )
     }, [ents, athlete])
 
-  /*
-   * If the customer arrived from a specific
-   * entitlement on the Plans page, this is
-   * the exact access we want to use.
-   */
   const selectedEntitlement =
     useMemo(() => {
       if (!requestedEntitlement) {
@@ -219,13 +296,6 @@ function BookingContent() {
       requestedEntitlement,
     ])
 
-  /*
-   * If a specific entitlement was requested,
-   * only its service type is available.
-   *
-   * Otherwise preserve the normal combined
-   * access behavior.
-   */
   const availableTypes =
     selectedEntitlement
       ? [
@@ -240,11 +310,6 @@ function BookingContent() {
           ),
         ]
 
-  /*
-   * If Plans sent us a specific entitlement
-   * but no type, automatically use that
-   * entitlement's type.
-   */
   useEffect(() => {
     if (
       selectedEntitlement &&
@@ -304,13 +369,6 @@ function BookingContent() {
       )
     })
 
-  /*
-   * When a specific entitlement was selected,
-   * show ONLY that entitlement's balance.
-   *
-   * Otherwise show the combined balance for
-   * the selected training type.
-   */
   const filteredEntitlements =
     selectedEntitlement
       ? [selectedEntitlement]
@@ -353,11 +411,20 @@ function BookingContent() {
     }
 
     /*
-     * If the URL requested a specific
-     * entitlement but it is no longer valid
-     * for this athlete, don't silently fall
-     * back to another package.
+     * Extra client-side protection.
+     * The database RPC remains the final
+     * authorization layer.
      */
+    if (
+      athleteLocked &&
+      athlete !== lockedAthleteId
+    ) {
+      setMsg(
+        'This membership belongs to a different athlete.'
+      )
+      return
+    }
+
     if (
       requestedEntitlement &&
       !selectedEntitlement
@@ -435,30 +502,67 @@ function BookingContent() {
         <label>
           Booking for
 
-          <select
-            value={athlete}
-            onChange={(event) =>
-              setAthlete(
-                event.target.value
-              )
-            }
-          >
-            <option value="">
-              Select athlete
-            </option>
+          {athleteLocked ? (
+            <>
+              <select
+                value={athlete}
+                disabled
+              >
+                {selectedAthlete ? (
+                  <option
+                    value={
+                      selectedAthlete.id
+                    }
+                  >
+                    {
+                      selectedAthlete.first_name
+                    }{' '}
+                    {
+                      selectedAthlete.last_name
+                    }
+                  </option>
+                ) : (
+                  <option
+                    value={
+                      lockedAthleteId
+                    }
+                  >
+                    Selected athlete
+                  </option>
+                )}
+              </select>
 
-            {athletes.map(
-              (item) => (
-                <option
-                  key={item.id}
-                  value={item.id}
-                >
-                  {item.first_name}{' '}
-                  {item.last_name}
-                </option>
-              )
-            )}
-          </select>
+              <small>
+                This access belongs to this
+                athlete.
+              </small>
+            </>
+          ) : (
+            <select
+              value={athlete}
+              onChange={(event) =>
+                setAthlete(
+                  event.target.value
+                )
+              }
+            >
+              <option value="">
+                Select athlete
+              </option>
+
+              {athletes.map(
+                (item) => (
+                  <option
+                    key={item.id}
+                    value={item.id}
+                  >
+                    {item.first_name}{' '}
+                    {item.last_name}
+                  </option>
+                )
+              )}
+            </select>
+          )}
         </label>
 
         <label>
@@ -513,6 +617,19 @@ function BookingContent() {
                     : 'credits'
                 } remaining`}
           </span>
+
+          {athleteLocked &&
+            selectedAthlete && (
+              <span>
+                For{' '}
+                {
+                  selectedAthlete.first_name
+                }{' '}
+                {
+                  selectedAthlete.last_name
+                }
+              </span>
+            )}
         </div>
       )}
 
