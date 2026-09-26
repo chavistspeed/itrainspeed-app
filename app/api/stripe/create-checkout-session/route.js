@@ -6,11 +6,6 @@ export const dynamic = 'force-dynamic'
 
 export async function POST(request) {
   try {
-    /*
-     * -------------------------------------------------------
-     * ENVIRONMENT CHECKS
-     * -------------------------------------------------------
-     */
     if (!process.env.STRIPE_SECRET_KEY) {
       return Response.json(
         { error: 'Stripe is not configured.' },
@@ -42,20 +37,12 @@ export async function POST(request) {
       process.env.STRIPE_SECRET_KEY
     )
 
-    /*
-     * -------------------------------------------------------
-     * AUTHENTICATION
-     * -------------------------------------------------------
-     */
     const authHeader =
       request.headers.get('authorization')
 
     if (!authHeader?.startsWith('Bearer ')) {
       return Response.json(
-        {
-          error:
-            'You must be signed in.',
-        },
+        { error: 'You must be signed in.' },
         { status: 401 }
       )
     }
@@ -92,11 +79,6 @@ export async function POST(request) {
       )
     }
 
-    /*
-     * -------------------------------------------------------
-     * REQUEST
-     * -------------------------------------------------------
-     */
     const body =
       await request.json()
 
@@ -108,18 +90,15 @@ export async function POST(request) {
 
     if (!packageId) {
       return Response.json(
-        {
-          error:
-            'A package is required.',
-        },
+        { error: 'A package is required.' },
         { status: 400 }
       )
     }
 
     /*
-     * -------------------------------------------------------
-     * PACKAGE
-     * -------------------------------------------------------
+     * Supabase is the source of truth for
+     * package pricing and entitlement
+     * configuration.
      */
     const {
       data: packageData,
@@ -165,9 +144,14 @@ export async function POST(request) {
     }
 
     /*
-     * -------------------------------------------------------
-     * ATHLETE-SPECIFIC ACCESS
-     * -------------------------------------------------------
+     * Athlete-specific access:
+     *
+     * - Track memberships belong to one athlete.
+     * - Group memberships belong to one athlete.
+     * - Normal Group credit packages are
+     *   family-shared.
+     * - Private credit packages are
+     *   family-shared.
      */
     const requiresAthlete =
       creditType === 'track' ||
@@ -193,9 +177,7 @@ export async function POST(request) {
         error: athleteError,
       } = await supabaseAdmin
         .from('athletes')
-        .select(
-          'id, guardian_id, first_name, last_name'
-        )
+        .select('id, guardian_id')
         .eq('id', athleteId)
         .eq('guardian_id', user.id)
         .single()
@@ -220,17 +202,16 @@ export async function POST(request) {
         : null
 
     /*
-     * -------------------------------------------------------
-     * TEMPORARY MEMBERSHIP DIAGNOSTIC
+     * DUPLICATE ATHLETE MEMBERSHIP PROTECTION
      *
-     * IMPORTANT:
-     * This intentionally stops athlete-specific
-     * membership checkout BEFORE Stripe.
+     * Athlete ownership was already verified
+     * above. Load the athlete's entitlements
+     * and perform the final membership match
+     * server-side.
      *
-     * It lets us see exactly what the production
-     * API receives and exactly what Supabase
-     * returns for the selected athlete.
-     * -------------------------------------------------------
+     * This happens BEFORE Stripe Checkout is
+     * created so an active athlete cannot pay
+     * for the same membership twice.
      */
     if (
       requiresAthlete &&
@@ -243,19 +224,7 @@ export async function POST(request) {
       } = await supabaseAdmin
         .from('entitlements')
         .select(
-          `
-            id,
-            guardian_id,
-            athlete_id,
-            package_id,
-            credit_type,
-            status,
-            unlimited,
-            starts_at,
-            expires_at,
-            stripe_subscription_id,
-            source
-          `
+          'id, guardian_id, athlete_id, package_id, status, expires_at, stripe_subscription_id'
         )
         .eq(
           'athlete_id',
@@ -263,66 +232,111 @@ export async function POST(request) {
         )
 
       if (entitlementCheckError) {
+        console.error(
+          'Duplicate membership lookup failed:',
+          entitlementCheckError
+        )
+
         return Response.json(
           {
             error:
-              'Unable to verify the athlete’s current membership.',
-
-            diagnostic_error:
-              entitlementCheckError.message,
+              'Unable to verify the athlete’s current membership. Please try again.',
           },
           { status: 500 }
         )
       }
 
-      /*
-       * STOP HERE.
-       *
-       * No Stripe Checkout Session will be
-       * created for this diagnostic request.
-       */
-      return Response.json(
-        {
-          error:
-            'MEMBERSHIP_DIAGNOSTIC',
+      const now = Date.now()
 
-          diagnostic: {
-            signed_in_guardian:
-              user.id,
+      const existingMembership =
+        (
+          athleteEntitlements || []
+        ).find((entitlement) => {
+          const sameGuardian =
+            entitlement.guardian_id ===
+            user.id
 
-            selected_athlete:
+          const sameAthlete =
+            entitlement.athlete_id ===
+            entitlementAthleteId
+
+          const samePackage =
+            entitlement.package_id ===
+            packageData.id
+
+          const isActive =
+            entitlement.status ===
+            'active'
+
+          const isUnexpired =
+            !entitlement.expires_at ||
+            new Date(
+              entitlement.expires_at
+            ).getTime() > now
+
+          return (
+            sameGuardian &&
+            sameAthlete &&
+            samePackage &&
+            isActive &&
+            isUnexpired
+          )
+        })
+
+      if (existingMembership) {
+        console.log(
+          'Duplicate membership blocked:',
+          {
+            guardian_id: user.id,
+            athlete_id:
               entitlementAthleteId,
-
-            selected_package:
+            package_id:
               packageData.id,
+            entitlement_id:
+              existingMembership.id,
+            stripe_subscription_id:
+              existingMembership
+                .stripe_subscription_id,
+          }
+        )
 
-            package_name:
-              packageData.name,
-
-            access_type:
-              packageData.access_type,
-
-            credit_type:
-              creditType,
-
-            payment_type:
-              packageData.payment_type,
-
-            purchase_limit:
-              packageData.purchase_limit,
-
-            entitlements_found:
-              athleteEntitlements || [],
+        return Response.json(
+          {
+            error:
+              `${packageData.name} is already active for this athlete.`,
+            code:
+              'ATHLETE_ALREADY_ENROLLED',
           },
-        },
-        { status: 409 }
+          { status: 409 }
+        )
+      }
+
+      console.log(
+        'No duplicate membership found:',
+        {
+          guardian_id: user.id,
+          athlete_id:
+            entitlementAthleteId,
+          package_id:
+            packageData.id,
+          entitlement_count:
+            (
+              athleteEntitlements || []
+            ).length,
+        }
       )
     }
 
     /*
-     * -------------------------------------------------------
-     * LIMITED PACKAGE CHECK
-     * -------------------------------------------------------
+     * LIMITED PACKAGE PRE-CHECK
+     *
+     * Prevent customers from entering Stripe
+     * Checkout after all limited spots have
+     * already been purchased.
+     *
+     * The database remains the final
+     * concurrency protection during webhook
+     * fulfillment.
      */
     if (
       packageData.purchase_limit !==
@@ -350,6 +364,11 @@ export async function POST(request) {
         )
 
       if (countError) {
+        console.error(
+          'Limited package availability check failed:',
+          countError
+        )
+
         return Response.json(
           {
             error:
@@ -369,7 +388,6 @@ export async function POST(request) {
           {
             error:
               `${packageData.name} is sold out.`,
-
             code:
               'PACKAGE_SOLD_OUT',
           },
@@ -379,9 +397,8 @@ export async function POST(request) {
     }
 
     /*
-     * -------------------------------------------------------
-     * STRIPE CUSTOMER
-     * -------------------------------------------------------
+     * Reuse the parent's existing Stripe
+     * customer whenever possible.
      */
     const {
       data: profile,
@@ -437,14 +454,6 @@ export async function POST(request) {
       }
     }
 
-    /*
-     * -------------------------------------------------------
-     * STRIPE CHECKOUT
-     *
-     * This section still handles normal,
-     * non-membership purchases.
-     * -------------------------------------------------------
-     */
     const origin =
       request.headers.get('origin') ||
       `https://${request.headers.get(
@@ -455,6 +464,11 @@ export async function POST(request) {
       packageData.payment_type ===
       'subscription'
 
+    /*
+     * Metadata follows the purchase through
+     * Stripe and lets the webhook create the
+     * correct entitlement.
+     */
     const metadata = {
       package_id:
         String(packageData.id),
@@ -546,8 +560,7 @@ export async function POST(request) {
       })
 
     return Response.json({
-      url:
-        checkoutSession.url,
+      url: checkoutSession.url,
     })
   } catch (error) {
     console.error(
