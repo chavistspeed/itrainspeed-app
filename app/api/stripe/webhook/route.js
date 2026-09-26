@@ -309,6 +309,8 @@ const entitlementAthleteId =
 
         p_payment_intent_id:
           paymentIntentId,
+        p_subscription_id: subscriptionId,
+
 
         p_customer_id:
           customerId,
