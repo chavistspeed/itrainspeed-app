@@ -67,8 +67,8 @@ export async function POST(request) {
       )
     }
 
-    // Never trust package pricing sent from the browser.
-    // Price and entitlement information always come from Supabase.
+    // Never trust pricing or entitlement details from the browser.
+    // Supabase is the source of truth.
     const { data: packageData, error: packageError } =
       await supabaseAdmin
         .from('packages')
@@ -97,7 +97,7 @@ export async function POST(request) {
       )
     }
 
-    // Track memberships belong to one athlete.
+    // Track memberships belong to one specific athlete.
     if (creditType === 'track') {
       if (!athleteId) {
         return Response.json(
@@ -125,12 +125,24 @@ export async function POST(request) {
       }
     }
 
-    // Group/private credits belong to the family account.
+    // Group/private/recovery access belongs to the family account.
+    // Track access belongs to the selected athlete.
     const entitlementAthleteId =
       creditType === 'track' ? athleteId : null
 
-    // Founding Athlete promotion inventory check.
-    if (packageData.name === 'Founding Athlete Promo') {
+    /*
+     * LIMITED PACKAGE PRE-CHECK
+     *
+     * This improves customer experience by preventing checkout
+     * from starting when a limited package is already sold out.
+     *
+     * The database fulfillment RPC remains the final authority
+     * against concurrent purchases.
+     */
+    if (
+      packageData.purchase_limit !== null &&
+      Number(packageData.purchase_limit) > 0
+    ) {
       const { count, error: countError } =
         await supabaseAdmin
           .from('purchases')
@@ -139,31 +151,54 @@ export async function POST(request) {
             head: true,
           })
           .eq('package_id', packageData.id)
-          .eq('payment_status', 'paid')
+          .eq('status', 'paid')
 
       if (countError) {
+        console.error(
+          'Limited package availability check failed:',
+          countError
+        )
+
         return Response.json(
-          { error: 'Unable to verify promotional availability.' },
+          {
+            error:
+              'Unable to verify package availability. Please try again.',
+          },
           { status: 500 }
         )
       }
 
-      if ((count || 0) >= 10) {
+      if (
+        (count || 0) >=
+        Number(packageData.purchase_limit)
+      ) {
         return Response.json(
-          { error: 'The Founding Athlete promotion is sold out.' },
+          {
+            error: `${packageData.name} is sold out.`,
+            code: 'PACKAGE_SOLD_OUT',
+          },
           { status: 409 }
         )
       }
     }
 
-    // Reuse Stripe customer when one already exists.
-    const { data: profile } = await supabaseAdmin
-      .from('profiles')
-      .select('stripe_customer_id')
-      .eq('id', user.id)
-      .single()
+    // Reuse the existing Stripe customer whenever possible.
+    const { data: profile, error: profileError } =
+      await supabaseAdmin
+        .from('profiles')
+        .select('stripe_customer_id')
+        .eq('id', user.id)
+        .single()
 
-    let stripeCustomerId = profile?.stripe_customer_id || null
+    if (profileError) {
+      console.error(
+        'Unable to load Stripe customer profile:',
+        profileError
+      )
+    }
+
+    let stripeCustomerId =
+      profile?.stripe_customer_id || null
 
     if (!stripeCustomerId) {
       const customer = await stripe.customers.create({
@@ -175,12 +210,20 @@ export async function POST(request) {
 
       stripeCustomerId = customer.id
 
-      await supabaseAdmin
-        .from('profiles')
-        .update({
-          stripe_customer_id: stripeCustomerId,
-        })
-        .eq('id', user.id)
+      const { error: customerSaveError } =
+        await supabaseAdmin
+          .from('profiles')
+          .update({
+            stripe_customer_id: stripeCustomerId,
+          })
+          .eq('id', user.id)
+
+      if (customerSaveError) {
+        console.error(
+          'Unable to save Stripe customer ID:',
+          customerSaveError
+        )
+      }
     }
 
     const origin =
