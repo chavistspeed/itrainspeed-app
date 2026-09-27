@@ -86,7 +86,26 @@ export default function Dashboard() {
 
     setProfile(p)
     setAthletes(a || [])
-    setBookings(b || [])
+    const upcomingBookings =
+  (b || [])
+    .filter(
+      (booking) =>
+        booking.sessions?.start_at &&
+        new Date(
+          booking.sessions.start_at
+        ) > new Date()
+    )
+    .sort(
+      (a, b) =>
+        new Date(
+          a.sessions.start_at
+        ) -
+        new Date(
+          b.sessions.start_at
+        )
+    )
+
+setBookings(upcomingBookings)
 
     /*
      * Keep active unlimited memberships and
