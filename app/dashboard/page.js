@@ -6,6 +6,19 @@ import Link from 'next/link'
 import AppShell from '../../components/AppShell'
 import { supabase } from '../../lib/supabase'
 
+function formatDate(value) {
+  if (!value) return ''
+
+  return new Date(value).toLocaleDateString(
+    undefined,
+    {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+    }
+  )
+}
+
 export default function Dashboard() {
   const [profile, setProfile] = useState(null)
   const [athletes, setAthletes] = useState([])
@@ -64,7 +77,9 @@ export default function Dashboard() {
         .limit(10),
 
       s.from('entitlements')
-        .select('*,packages(name,access_type)')
+        .select(
+          '*,packages(name,access_type)'
+        )
         .eq('guardian_id', user.id)
         .eq('status', 'active'),
     ])
@@ -73,12 +88,39 @@ export default function Dashboard() {
     setAthletes(a || [])
     setBookings(b || [])
 
+    /*
+     * Keep active unlimited memberships and
+     * active credit packages that still have
+     * usable sessions.
+     *
+     * Exhausted credit packages remain in
+     * Supabase for history but do not affect
+     * the customer dashboard.
+     */
     setEnts(
       (e || []).filter(
-        (entitlement) =>
-          !entitlement.expires_at ||
-          new Date(entitlement.expires_at) >
-            new Date()
+        (entitlement) => {
+          const unexpired =
+            !entitlement.expires_at ||
+            new Date(
+              entitlement.expires_at
+            ) > new Date()
+
+          if (!unexpired) {
+            return false
+          }
+
+          if (entitlement.unlimited) {
+            return true
+          }
+
+          return (
+            Number(
+              entitlement.credits_remaining ||
+                0
+            ) > 0
+          )
+        }
       )
     )
   }
@@ -123,24 +165,29 @@ export default function Dashboard() {
 
   const groupEntitlements =
     ents.filter(
-      (e) => e.credit_type === 'group'
+      (e) =>
+        e.credit_type === 'group'
     )
 
   const privateEntitlements =
     ents.filter(
-      (e) => e.credit_type === 'private'
+      (e) =>
+        e.credit_type === 'private'
     )
 
   const trackEntitlements =
     ents.filter(
-      (e) => e.credit_type === 'track'
+      (e) =>
+        e.credit_type === 'track'
     )
 
   /*
-   * Shared Group credits have no athlete_id.
+   * Family Group credits do not have an
+   * athlete_id.
    *
-   * Founding Athlete Membership is Group access,
-   * but it belongs to one specific athlete.
+   * Athlete-specific Group memberships such
+   * as Founding Athlete Membership must not
+   * inflate the family's Group credit balance.
    */
   const sharedGroupEntitlements =
     groupEntitlements.filter(
@@ -154,11 +201,6 @@ export default function Dashboard() {
         e.unlimited
     )
 
-  /*
-   * Shared Group credits should never become
-   * "Unlimited" just because one athlete has an
-   * unlimited membership.
-   */
   const sharedGroupCredits =
     sharedGroupEntitlements.reduce(
       (total, entitlement) =>
@@ -186,8 +228,8 @@ export default function Dashboard() {
         )
 
   /*
-   * Build athlete-specific unlimited membership
-   * information for the dashboard.
+   * Athlete-specific unlimited Group
+   * memberships.
    */
   const unlimitedGroupAthletes =
     athleteGroupMemberships.map(
@@ -219,6 +261,31 @@ export default function Dashboard() {
       .join(' ')
   }
 
+  function membershipStatus(
+    entitlement
+  ) {
+    if (
+      entitlement
+        .cancel_at_period_end &&
+      entitlement
+        .cancellation_effective_at
+    ) {
+      return `Active through ${formatDate(
+        entitlement
+          .cancellation_effective_at
+      )}`
+    }
+
+    if (
+      entitlement
+        .cancel_at_period_end
+    ) {
+      return 'Cancellation scheduled'
+    }
+
+    return 'Active membership'
+  }
+
   return (
     <AppShell title="Athlete Hub">
       <section className="hero">
@@ -231,15 +298,23 @@ export default function Dashboard() {
 
         <div className="stats walletStats">
           <div>
-            <b>{sharedGroupCredits}</b>
+            <b>
+              {sharedGroupCredits}
+            </b>
+
             <span>
-              Shared Group sessions
+              Group Credits
             </span>
           </div>
 
           <div>
-            <b>{privateBalance}</b>
-            <span>Private sessions</span>
+            <b>
+              {privateBalance}
+            </b>
+
+            <span>
+              Private Credits
+            </span>
           </div>
 
           <div>
@@ -248,17 +323,30 @@ export default function Dashboard() {
                 ? 'Active'
                 : '—'}
             </b>
-            <span>Track membership</span>
+
+            <span>
+              Track Access
+            </span>
           </div>
 
           <div>
-            <b>{athletes.length}</b>
-            <span>Athletes</span>
+            <b>
+              {athletes.length}
+            </b>
+
+            <span>
+              Athletes
+            </span>
           </div>
 
           <div>
-            <b>{bookings.length}</b>
-            <span>Upcoming</span>
+            <b>
+              {bookings.length}
+            </b>
+
+            <span>
+              Upcoming
+            </span>
           </div>
         </div>
 
@@ -284,6 +372,12 @@ export default function Dashboard() {
           {msg}
         </div>
       )}
+
+      {/*
+       * ---------------------------------------------------
+       * UNLIMITED GROUP MEMBERSHIPS
+       * ---------------------------------------------------
+       */}
 
       {unlimitedGroupAthletes.length >
         0 && (
@@ -321,7 +415,9 @@ export default function Dashboard() {
                   </span>
 
                   <span>
-                    Unlimited Group sessions
+                    {membershipStatus(
+                      entitlement
+                    )}
                   </span>
                 </div>
 
@@ -329,7 +425,7 @@ export default function Dashboard() {
                   className="miniCta"
                   href={`/booking?athlete=${entitlement.athlete_id}&type=group&entitlement=${entitlement.id}`}
                 >
-                  Book training
+                  Book Training
                 </Link>
               </div>
             )
@@ -337,9 +433,17 @@ export default function Dashboard() {
         </section>
       )}
 
+      {/*
+       * ---------------------------------------------------
+       * ATHLETES
+       * ---------------------------------------------------
+       */}
+
       <section>
         <div className="row">
-          <h2>Your athletes</h2>
+          <h2>
+            Your athletes
+          </h2>
 
           <Link href="/athletes">
             Manage
@@ -347,35 +451,43 @@ export default function Dashboard() {
         </div>
 
         {athletes.length ? (
-          athletes.map((athlete) => (
-            <div
-              className="card athleteAction"
-              key={athlete.id}
-            >
-              <div>
-                <b>
-                  {athlete.first_name}{' '}
-                  {athlete.last_name}
-                </b>
-
-                <span>
-                  {athlete.age
-                    ? `Age ${athlete.age}`
-                    : ''}{' '}
-                  {athlete.sport
-                    ? `• ${athlete.sport}`
-                    : ''}
-                </span>
-              </div>
-
-              <Link
-                className="miniCta"
-                href={`/booking?athlete=${athlete.id}`}
+          athletes.map(
+            (athlete) => (
+              <div
+                className="card athleteAction"
+                key={athlete.id}
               >
-                Book training
-              </Link>
-            </div>
-          ))
+                <div>
+                  <b>
+                    {athleteName(
+                      athlete
+                    )}
+                  </b>
+
+                  <span>
+                    {athlete.age
+                      ? `Age ${athlete.age}`
+                      : ''}
+
+                    {athlete.age &&
+                    athlete.sport
+                      ? ' • '
+                      : ''}
+
+                    {athlete.sport ||
+                      ''}
+                  </span>
+                </div>
+
+                <Link
+                  className="miniCta"
+                  href={`/booking?athlete=${athlete.id}`}
+                >
+                  Book Training
+                </Link>
+              </div>
+            )
+          )
         ) : (
           <div className="empty">
             Add your first athlete to
@@ -384,9 +496,17 @@ export default function Dashboard() {
         )}
       </section>
 
+      {/*
+       * ---------------------------------------------------
+       * UPCOMING TRAINING
+       * ---------------------------------------------------
+       */}
+
       <section>
         <div className="row">
-          <h2>Upcoming training</h2>
+          <h2>
+            Upcoming training
+          </h2>
 
           <Link href="/booking">
             Book training
@@ -394,64 +514,69 @@ export default function Dashboard() {
         </div>
 
         {bookings.length ? (
-          bookings.map((booking) => {
-            const athlete =
-              athletes.find(
-                (a) =>
-                  a.id ===
-                  booking.athlete_id
-              )
+          bookings.map(
+            (booking) => {
+              const athlete =
+                athletes.find(
+                  (a) =>
+                    a.id ===
+                    booking.athlete_id
+                )
 
-            return (
-              <div
-                className="bookingRow card"
-                key={booking.id}
-              >
-                <div>
-                  <b>
-                    {
-                      booking.sessions
-                        ?.programs?.name
-                    }
-                  </b>
+              return (
+                <div
+                  className="bookingRow card"
+                  key={booking.id}
+                >
+                  <div>
+                    <b>
+                      {
+                        booking.sessions
+                          ?.programs
+                          ?.name
+                      }
+                    </b>
 
-                  <span>
-                    {booking.sessions
-                      ?.start_at
-                      ? new Date(
-                          booking.sessions.start_at
-                        ).toLocaleString()
-                      : ''}
-                  </span>
+                    <span>
+                      {booking.sessions
+                        ?.start_at
+                        ? new Date(
+                            booking
+                              .sessions
+                              .start_at
+                          ).toLocaleString()
+                        : ''}
+                    </span>
 
-                  <span>
-                    {athlete
-                      ? athleteName(
-                          athlete
+                    <span>
+                      {athlete
+                        ? athleteName(
+                            athlete
+                          )
+                        : ''}
+                    </span>
+                  </div>
+
+                  <div className="bookingActions">
+                    <span className="pill">
+                      Booked
+                    </span>
+
+                    <button
+                      className="dangerGhost"
+                      onClick={() =>
+                        cancel(
+                          booking.id
                         )
-                      : ''}
-                  </span>
+                      }
+                    >
+                      Cancel
+                    </button>
+                  </div>
                 </div>
-
-                <div className="bookingActions">
-                  <span className="pill">
-                    Booked
-                  </span>
-
-                  <button
-                    className="dangerGhost"
-                    onClick={() =>
-                      cancel(
-                        booking.id
-                      )
-                    }
-                  >
-                    Cancel
-                  </button>
-                </div>
-              </div>
-            )
-          })
+              )
+            }
+          )
         ) : (
           <div className="empty">
             No upcoming bookings yet.
@@ -459,7 +584,14 @@ export default function Dashboard() {
         )}
       </section>
 
-      {profile?.role !== 'parent' && (
+      {/*
+       * ---------------------------------------------------
+       * COACH / ADMIN ACCESS
+       * ---------------------------------------------------
+       */}
+
+      {profile?.role !==
+        'parent' && (
         <Link
           className="biglink"
           href="/coach"
