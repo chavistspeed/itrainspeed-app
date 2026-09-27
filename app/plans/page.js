@@ -18,14 +18,7 @@ const label = (t) =>
     recovery: 'Recovery',
   }[t] || t)
 
-const isAthleteSpecific = (p) =>
-  p?.credit_type === 'track' ||
-  (
-    p?.credit_type === 'group' &&
-    p?.access_type === 'membership'
-  )
-
-const formatDate = (value) => {
+function formatDate(value) {
   if (!value) return ''
 
   return new Date(value).toLocaleDateString(
@@ -38,24 +31,60 @@ const formatDate = (value) => {
   )
 }
 
+/*
+ * Determines whether a package belongs
+ * to one specific athlete.
+ *
+ * Track memberships are athlete-specific.
+ *
+ * Group memberships such as Founding
+ * Athlete Membership are athlete-specific.
+ *
+ * Normal Group and Private credit packages
+ * remain family-shared.
+ */
+const isAthleteSpecific = (p) =>
+  p?.credit_type === 'track' ||
+  (
+    p?.credit_type === 'group' &&
+    p?.access_type === 'membership'
+  )
+
 function PlansContent() {
   const searchParams = useSearchParams()
 
-  const [packages, setPackages] = useState([])
-  const [ents, setEnts] = useState([])
-  const [athletes, setAthletes] = useState([])
-  const [profile, setProfile] = useState(null)
+  const [packages, setPackages] =
+    useState([])
 
-  const [msg, setMsg] = useState('')
+  const [ents, setEnts] =
+    useState([])
 
-  const [selectedAthlete, setSelectedAthlete] =
+  const [athletes, setAthletes] =
+    useState([])
+
+  const [msg, setMsg] =
     useState('')
 
-  const [purchasing, setPurchasing] =
-    useState(null)
+  const [
+    selectedAthlete,
+    setSelectedAthlete,
+  ] = useState('')
 
-  const [openingPortal, setOpeningPortal] =
-    useState(false)
+  const [
+    purchasing,
+    setPurchasing,
+  ] = useState(null)
+
+  const [
+    openingPortal,
+    setOpeningPortal,
+  ] = useState(false)
+
+  /*
+   * -------------------------------------------------------
+   * LOAD CUSTOMER DATA
+   * -------------------------------------------------------
+   */
 
   async function load() {
     const s = supabase()
@@ -67,39 +96,85 @@ function PlansContent() {
     if (!user) return
 
     const [
-      { data: p },
       { data: pk },
       { data: e },
       { data: a },
     ] = await Promise.all([
-      s.from('profiles')
-        .select('*')
-        .eq('id', user.id)
-        .single(),
-
       s.from('packages')
         .select('*')
         .eq('active', true)
         .order('sort_order'),
 
       s.from('entitlements')
-        .select('*,packages(name,price_cents,payment_type,access_type)')
-        .eq('guardian_id', user.id)
-        .eq('status', 'active')
-        .order('created_at', {
-          ascending: false,
-        }),
+        .select(
+          '*,packages(name,access_type)'
+        )
+        .eq(
+          'guardian_id',
+          user.id
+        )
+        .eq(
+          'status',
+          'active'
+        )
+        .order(
+          'created_at',
+          {
+            ascending: false,
+          }
+        ),
 
       s.from('athletes')
         .select('*')
-        .eq('guardian_id', user.id)
+        .eq(
+          'guardian_id',
+          user.id
+        )
         .order('first_name'),
     ])
 
-    setProfile(p)
     setPackages(pk || [])
-    setEnts(e || [])
     setAthletes(a || [])
+
+    /*
+     * Only show access the customer can
+     * currently use.
+     *
+     * Unlimited memberships remain visible.
+     *
+     * Credit packages with zero remaining
+     * sessions stay in Supabase for history
+     * but disappear from Active Access.
+     */
+    setEnts(
+      (e || []).filter(
+        (entitlement) => {
+          const unexpired =
+            !entitlement.expires_at ||
+            new Date(
+              entitlement.expires_at
+            ) > new Date()
+
+          if (!unexpired) {
+            return false
+          }
+
+          if (
+            entitlement.unlimited
+          ) {
+            return true
+          }
+
+          return (
+            Number(
+              entitlement
+                .credits_remaining ||
+                0
+            ) > 0
+          )
+        }
+      )
+    )
 
     setSelectedAthlete(
       (current) =>
@@ -113,11 +188,21 @@ function PlansContent() {
     load()
   }, [])
 
+  /*
+   * -------------------------------------------------------
+   * CHECKOUT RETURN
+   * -------------------------------------------------------
+   */
+
   useEffect(() => {
     const checkout =
-      searchParams.get('checkout')
+      searchParams.get(
+        'checkout'
+      )
 
-    if (checkout === 'success') {
+    if (
+      checkout === 'success'
+    ) {
       setMsg(
         'Payment successful. Your training access is being activated.'
       )
@@ -138,7 +223,9 @@ function PlansContent() {
       }
     }
 
-    if (checkout === 'cancelled') {
+    if (
+      checkout === 'cancelled'
+    ) {
       setMsg(
         'Checkout was cancelled. You were not charged.'
       )
@@ -164,6 +251,7 @@ function PlansContent() {
       setMsg(
         'Please select the athlete receiving this membership.'
       )
+
       return
     }
 
@@ -176,35 +264,40 @@ function PlansContent() {
         data: { session },
       } = await s.auth.getSession()
 
-      if (!session?.access_token) {
+      if (
+        !session?.access_token
+      ) {
         throw new Error(
           'Please sign in again before purchasing.'
         )
       }
 
-      const response = await fetch(
-        '/api/stripe/create-checkout-session',
-        {
-          method: 'POST',
+      const response =
+        await fetch(
+          '/api/stripe/create-checkout-session',
+          {
+            method: 'POST',
 
-          headers: {
-            'Content-Type':
-              'application/json',
+            headers: {
+              'Content-Type':
+                'application/json',
 
-            Authorization:
-              `Bearer ${session.access_token}`,
-          },
+              Authorization:
+                `Bearer ${session.access_token}`,
+            },
 
-          body: JSON.stringify({
-            package_id: p.id,
+            body:
+              JSON.stringify({
+                package_id:
+                  p.id,
 
-            athlete_id:
-              athleteSpecific
-                ? selectedAthlete
-                : null,
-          }),
-        }
-      )
+                athlete_id:
+                  athleteSpecific
+                    ? selectedAthlete
+                    : null,
+              }),
+          }
+        )
 
       const result =
         await response.json()
@@ -238,6 +331,15 @@ function PlansContent() {
    * -------------------------------------------------------
    * STRIPE CUSTOMER PORTAL
    * -------------------------------------------------------
+   *
+   * Stripe hosts the billing-management
+   * interface.
+   *
+   * Parents can update their payment method
+   * and manage recurring subscriptions there.
+   *
+   * Stripe webhook events keep Supabase in
+   * sync with subscription changes.
    */
 
   async function openBillingPortal() {
@@ -251,23 +353,26 @@ function PlansContent() {
         data: { session },
       } = await s.auth.getSession()
 
-      if (!session?.access_token) {
+      if (
+        !session?.access_token
+      ) {
         throw new Error(
-          'Please sign in again before managing billing.'
+          'Please sign in again before managing your billing.'
         )
       }
 
-      const response = await fetch(
-        '/api/stripe/create-portal-session',
-        {
-          method: 'POST',
+      const response =
+        await fetch(
+          '/api/stripe/create-portal-session',
+          {
+            method: 'POST',
 
-          headers: {
-            Authorization:
-              `Bearer ${session.access_token}`,
-          },
-        }
-      )
+            headers: {
+              Authorization:
+                `Bearer ${session.access_token}`,
+            },
+          }
+        )
 
       const result =
         await response.json()
@@ -299,77 +404,22 @@ function PlansContent() {
 
   /*
    * -------------------------------------------------------
-   * ADMIN TEST ACCESS
+   * BOOKING LINKS
    * -------------------------------------------------------
    *
-   * Keep the underlying admin function available during
-   * testing, but remove the large test-mode banner from
-   * the customer-facing page.
-   */
-
-  async function grant(p) {
-    if (
-      profile?.role !== 'admin'
-    ) {
-      return
-    }
-
-    setMsg('')
-
-    const athleteSpecific =
-      isAthleteSpecific(p)
-
-    const athleteId =
-      athleteSpecific
-        ? selectedAthlete || null
-        : null
-
-    if (
-      athleteSpecific &&
-      !athleteId
-    ) {
-      setMsg(
-        'Select an athlete before granting athlete-specific access.'
-      )
-      return
-    }
-
-    const { error } =
-      await supabase().rpc(
-        'admin_grant_test_package',
-        {
-          p_package_id: p.id,
-
-          p_guardian_id:
-            profile.id,
-
-          p_athlete_id:
-            athleteId,
-        }
-      )
-
-    setMsg(
-      error
-        ? error.message
-        : `Test access granted: ${p.name}`
-    )
-
-    if (!error) {
-      load()
-    }
-  }
-
-  /*
-   * -------------------------------------------------------
-   * BOOKING
-   * -------------------------------------------------------
+   * Passing the entitlement ID ensures that
+   * booking uses the exact access selected
+   * by the customer.
    */
 
   function bookUrl(e) {
     const q =
       new URLSearchParams({
-        type: e.credit_type,
-        entitlement: e.id,
+        type:
+          e.credit_type,
+
+        entitlement:
+          e.id,
       })
 
     if (e.athlete_id) {
@@ -381,6 +431,12 @@ function PlansContent() {
 
     return `/booking?${q.toString()}`
   }
+
+  /*
+   * -------------------------------------------------------
+   * PURCHASE BUTTON
+   * -------------------------------------------------------
+   */
 
   function purchaseButtonText(p) {
     if (
@@ -404,22 +460,57 @@ function PlansContent() {
   }
 
   /*
-   * Hide fully-used credit packages from the
-   * customer's Active Access section.
-   *
-   * They remain in Supabase for history and
-   * cancellation/reconciliation purposes.
+   * -------------------------------------------------------
+   * MEMBERSHIP STATUS
+   * -------------------------------------------------------
    */
-  const visibleEntitlements =
-    ents.filter((e) => {
-      if (e.unlimited) {
-        return true
-      }
 
-      return Number(
-        e.credits_remaining || 0
-      ) > 0
-    })
+  function accessStatus(e) {
+    /*
+     * Subscription is scheduled to cancel
+     * at the end of its paid billing period.
+     */
+    if (
+      e.cancel_at_period_end &&
+      e.cancellation_effective_at
+    ) {
+      return `Active through ${formatDate(
+        e.cancellation_effective_at
+      )}`
+    }
+
+    /*
+     * Fallback in case Stripe tells us
+     * cancellation is scheduled before the
+     * effective date has been populated.
+     */
+    if (
+      e.cancel_at_period_end
+    ) {
+      return 'Cancellation scheduled'
+    }
+
+    /*
+     * Recurring subscription with no
+     * scheduled cancellation.
+     */
+    if (
+      e.stripe_subscription_id
+    ) {
+      return 'Active recurring membership'
+    }
+
+    /*
+     * Fixed-duration access.
+     */
+    if (e.expires_at) {
+      return `Valid through ${formatDate(
+        e.expires_at
+      )}`
+    }
+
+    return 'Active access'
+  }
 
   /*
    * -------------------------------------------------------
@@ -431,29 +522,23 @@ function PlansContent() {
     <AppShell title="Plans & Packages">
       <div className="pageTitleRow">
         <div>
-          <h1>My training</h1>
+          <h1>
+            My training
+          </h1>
 
           <p className="subtle">
-            Purchase training, manage
-            your available sessions and
-            memberships, and book
-            eligible training.
+            Purchase training,
+            manage your available
+            sessions and memberships,
+            and book eligible
+            training.
           </p>
         </div>
 
-        <div
-          className="inlineActions"
-          style={{
-            flexWrap: 'nowrap',
-            alignItems: 'center',
-          }}
-        >
+        <div className="inlineActions">
           <Link
             className="ctaLink"
             href="/booking"
-            style={{
-              whiteSpace: 'nowrap',
-            }}
           >
             Book Training
           </Link>
@@ -466,11 +551,6 @@ function PlansContent() {
             disabled={
               openingPortal
             }
-            style={{
-              whiteSpace: 'nowrap',
-              width: 'auto',
-              minWidth: '150px',
-            }}
           >
             {openingPortal
               ? 'Opening Billing...'
@@ -496,39 +576,14 @@ function PlansContent() {
           Your active access
         </h2>
 
-        {visibleEntitlements.length ? (
-          visibleEntitlements.map((e) => {
+        {ents.length ? (
+          ents.map((e) => {
             const athlete =
               athletes.find(
                 (x) =>
                   x.id ===
                   e.athlete_id
               )
-
-            const athleteName =
-              athlete
-                ? [
-                    athlete.first_name,
-                    athlete.last_name,
-                  ]
-                    .filter(Boolean)
-                    .join(' ')
-                : ''
-
-            const isRecurring =
-              Boolean(
-                e.stripe_subscription_id
-              )
-
-            
-
-            const scheduledToCancel =
-              Boolean(
-                e.cancel_at_period_end
-              )
-
-            const cancellationDate =
-              e.cancellation_effective_at
 
             return (
               <div
@@ -542,16 +597,16 @@ function PlansContent() {
                     ).toUpperCase()}
                   </small>
 
-                  {athleteName && (
-                    <div
-                      style={{
-                        marginTop: '10px',
-                        fontSize: '14px',
-                        fontWeight: 700,
-                      }}
-                    >
-                      {athleteName}
-                    </div>
+                  {athlete && (
+                    <b className="athleteAccessName">
+                      {
+                        athlete.first_name
+                      }{' '}
+                      {
+                        athlete.last_name ||
+                        ''
+                      }
+                    </b>
                   )}
 
                   <h3>
@@ -561,8 +616,6 @@ function PlansContent() {
                         e.credit_type
                       )}
                   </h3>
-
-
 
                   <b className="balanceText">
                     {e.unlimited
@@ -577,50 +630,22 @@ function PlansContent() {
                         } remaining`}
                   </b>
 
-                  {!athleteName && (
+                  {!athlete && (
                     <span>
-                      Shared by all athletes
-                      on this account
+                      Shared by all
+                      athletes on this
+                      account
                     </span>
                   )}
 
-                  {scheduledToCancel &&
-                  cancellationDate ? (
-                    <span>
-                      Active through{' '}
-                      {formatDate(
-                        cancellationDate
-                      )}
-                    </span>
-                  ) : scheduledToCancel ? (
-                    <span>
-                      Cancellation scheduled
-                    </span>
-                  ) : e.expires_at ? (
-                    <span>
-                      Valid through{' '}
-                      {formatDate(
-                        e.expires_at
-                      )}
-                    </span>
-                  ) : isRecurring ? (
-                    <span>
-                      Active recurring
-                      membership
-                    </span>
-                  ) : (
-                    <span>
-                      No expiration
-                    </span>
-                  )}
+                  <span>
+                    {accessStatus(e)}
+                  </span>
                 </div>
 
                 <Link
                   className="ctaLink"
                   href={bookUrl(e)}
-                  style={{
-                    whiteSpace: 'nowrap',
-                  }}
                 >
                   {e.credit_type ===
                   'track'
@@ -632,8 +657,8 @@ function PlansContent() {
           })
         ) : (
           <div className="empty">
-            No package or membership
-            access yet.
+            You don't have any active
+            training access yet.
           </div>
         )}
       </section>
@@ -649,129 +674,110 @@ function PlansContent() {
           Available plans
         </h2>
 
-        {packages.map((p) => {
-          const athleteSpecific =
-            isAthleteSpecific(p)
+        {packages.length ? (
+          packages.map((p) => {
+            const athleteSpecific =
+              isAthleteSpecific(p)
 
-          return (
-            <article
-              className="card packageCard"
-              key={p.id}
-            >
-              <div>
-                <small>
-                  {(
-                    p.access_type ||
-                    'training'
-                  ).toUpperCase()}{' '}
-                  •{' '}
-                  {label(
-                    p.credit_type
-                  ).toUpperCase()}
-                </small>
+            return (
+              <article
+                className="card packageCard"
+                key={p.id}
+              >
+                <div>
+                  <small>
+                    {(
+                      p.access_type ||
+                      'training'
+                    ).toUpperCase()}{' '}
+                    •{' '}
+                    {label(
+                      p.credit_type
+                    ).toUpperCase()}
+                  </small>
 
-                <h3>
-                  {p.name}
-                </h3>
+                  <h3>
+                    {p.name}
+                  </h3>
 
-                {p.description && (
-                  <span>
-                    {p.description}
-                  </span>
-                )}
-
-                {p.purchase_limit && (
-                  <span className="promoText">
-                    Limited to the first{' '}
-                    {
-                      p.purchase_limit
-                    }{' '}
-                    athletes
-                  </span>
-                )}
-
-                <b className="packagePrice">
-                  {money(
-                    p.price_cents
+                  {p.description && (
+                    <span>
+                      {p.description}
+                    </span>
                   )}
 
-                  {p.payment_type ===
-                  'subscription'
-                    ? '/month'
-                    : ''}
-                </b>
+                  {p.purchase_limit && (
+                    <span className="promoText">
+                      Limited to the
+                      first{' '}
+                      {
+                        p.purchase_limit
+                      }{' '}
+                      athletes
+                    </span>
+                  )}
 
-                {athleteSpecific && (
-                  <label>
-                    Athlete
+                  <b className="packagePrice">
+                    {money(
+                      p.price_cents
+                    )}
 
-                    <select
-                      value={
-                        selectedAthlete
-                      }
-                      onChange={(e) =>
-                        setSelectedAthlete(
-                          e.target.value
-                        )
-                      }
-                      required
-                    >
-                      {athletes.length ? (
-                        athletes.map(
-                          (a) => (
-                            <option
-                              key={
-                                a.id
-                              }
-                              value={
-                                a.id
-                              }
-                            >
-                              {
-                                a.first_name
-                              }{' '}
-                              {
-                                a.last_name
-                              }
-                            </option>
+                    {p.payment_type ===
+                    'subscription'
+                      ? '/month'
+                      : ''}
+                  </b>
+
+                  {athleteSpecific && (
+                    <label>
+                      Athlete
+
+                      <select
+                        value={
+                          selectedAthlete
+                        }
+                        onChange={(e) =>
+                          setSelectedAthlete(
+                            e.target.value
                           )
-                        )
-                      ) : (
-                        <option value="">
-                          Add an athlete
-                          first
-                        </option>
-                      )}
-                    </select>
-                  </label>
-                )}
-              </div>
-
-              <div className="inlineActions">
-                <button
-                  onClick={() =>
-                    purchase(p)
-                  }
-                  disabled={
-                    purchasing !==
-                      null ||
-                    (
-                      athleteSpecific &&
-                      !selectedAthlete
-                    )
-                  }
-                >
-                  {purchaseButtonText(
-                    p
+                        }
+                        required
+                      >
+                        {athletes.length ? (
+                          athletes.map(
+                            (a) => (
+                              <option
+                                key={
+                                  a.id
+                                }
+                                value={
+                                  a.id
+                                }
+                              >
+                                {
+                                  a.first_name
+                                }{' '}
+                                {
+                                  a.last_name
+                                }
+                              </option>
+                            )
+                          )
+                        ) : (
+                          <option value="">
+                            Add an athlete
+                            first
+                          </option>
+                        )}
+                      </select>
+                    </label>
                   )}
-                </button>
+                </div>
 
-                {profile?.role ===
-                  'admin' && (
+                <div className="inlineActions">
                   <button
-                    className="secondary smallBtn"
                     onClick={() =>
-                      grant(p)
+                      purchase(p)
                     }
                     disabled={
                       purchasing !==
@@ -782,13 +788,20 @@ function PlansContent() {
                       )
                     }
                   >
-                    Grant test access
+                    {purchaseButtonText(
+                      p
+                    )}
                   </button>
-                )}
-              </div>
-            </article>
-          )
-        })}
+                </div>
+              </article>
+            )
+          })
+        ) : (
+          <div className="empty">
+            No training plans are
+            currently available.
+          </div>
+        )}
       </section>
     </AppShell>
   )
