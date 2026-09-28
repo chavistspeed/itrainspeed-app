@@ -26,14 +26,6 @@ function stripeTimestampToIso(value) {
 function getSubscriptionPeriodEnd(
   subscription
 ) {
-  /*
-   * Stripe subscriptions normally expose
-   * current_period_end directly.
-   *
-   * Keep a fallback to the first subscription
-   * item so this remains resilient to newer
-   * Stripe response shapes.
-   */
   if (
     subscription?.current_period_end
   ) {
@@ -65,11 +57,6 @@ function getCancellationState(
     }
   }
 
-  /*
-   * cancel_at can be present for a scheduled
-   * Stripe cancellation. Otherwise use the
-   * current billing period end.
-   */
   const cancellationTimestamp =
     subscription?.cancel_at ||
     getSubscriptionPeriodEnd(
@@ -173,10 +160,6 @@ function isAthleteAlreadyEnrolledError(
  * -------------------------------------------------------
  * FAILED LIMITED MEMBERSHIP RECOVERY
  * -------------------------------------------------------
- *
- * Protects against the rare race condition where
- * multiple customers enter Stripe Checkout while only
- * one limited membership spot remains.
  */
 
 async function cancelAndRefundRejectedCheckout(
@@ -191,11 +174,6 @@ async function cancelAndRefundRejectedCheckout(
       : session.subscription?.id ||
         null
 
-  /*
-   * -----------------------------------------------------
-   * SUBSCRIPTION CHECKOUT
-   * -----------------------------------------------------
-   */
   if (subscriptionId) {
     let subscription = null
 
@@ -286,12 +264,6 @@ async function cancelAndRefundRejectedCheckout(
       refunded: true,
     }
   }
-
-  /*
-   * -----------------------------------------------------
-   * ONE-TIME CHECKOUT
-   * -----------------------------------------------------
-   */
 
   const paymentIntentId =
     typeof session.payment_intent ===
@@ -435,10 +407,6 @@ async function fulfillCheckout(
     )
   }
 
-  /*
-   * Stripe controls recurring subscription
-   * expiration/cancellation.
-   */
   if (isSubscription) {
     expiresAt = null
   }
@@ -471,12 +439,6 @@ async function fulfillCheckout(
     Number(
       packageData.purchase_limit
     ) > 0
-
-  /*
-   * -----------------------------------------------------
-   * LIMITED PACKAGE FULFILLMENT
-   * -----------------------------------------------------
-   */
 
   if (hasPurchaseLimit) {
     const {
@@ -667,13 +629,151 @@ async function fulfillCheckout(
 
 /*
  * -------------------------------------------------------
- * SUBSCRIPTION STATE
+ * REFUND TRACKING
  * -------------------------------------------------------
  *
- * Scheduled cancellation does NOT revoke access.
+ * charge.refunded is the source of truth for refunds.
  *
- * Stripe remains the authority for when a recurring
- * membership actually terminates.
+ * We record the cumulative amount Stripe says has been
+ * refunded against the charge.
+ *
+ * IMPORTANT:
+ * This version deliberately does NOT delete or alter an
+ * entitlement. Purchases and entitlements do not yet
+ * have a direct purchase_id relationship, so guessing
+ * which entitlement belongs to a refund could revoke
+ * the wrong customer's credits when the same package
+ * has been purchased multiple times.
+ */
+
+async function handleChargeRefunded(
+  admin,
+  charge
+) {
+  const paymentIntentId =
+    typeof charge.payment_intent ===
+    'string'
+      ? charge.payment_intent
+      : charge.payment_intent?.id ||
+        null
+
+  if (!paymentIntentId) {
+    console.warn(
+      'Refunded charge did not contain a PaymentIntent.',
+      {
+        chargeId: charge.id,
+      }
+    )
+
+    return
+  }
+
+  const {
+    data: purchase,
+    error: purchaseError,
+  } = await admin
+    .from('purchases')
+    .select(
+      'id, amount_cents, stripe_payment_intent_id'
+    )
+    .eq(
+      'stripe_payment_intent_id',
+      paymentIntentId
+    )
+    .maybeSingle()
+
+  if (purchaseError) {
+    throw purchaseError
+  }
+
+  /*
+   * A charge.refunded event can also be generated for
+   * a payment that was intentionally rejected before
+   * an iTrainSpeed purchase record was created, such as
+   * limited-membership race protection.
+   *
+   * That is not a webhook failure.
+   */
+  if (!purchase) {
+    console.warn(
+      'Stripe refund received with no matching iTrainSpeed purchase.',
+      {
+        chargeId: charge.id,
+        paymentIntentId,
+      }
+    )
+
+    return
+  }
+
+  const refundedAmount =
+    Number(
+      charge.amount_refunded || 0
+    )
+
+  const purchaseAmount =
+    Number(
+      purchase.amount_cents || 0
+    )
+
+  const isFullRefund =
+    Boolean(charge.refunded) ||
+    (
+      purchaseAmount > 0 &&
+      refundedAmount >=
+        purchaseAmount
+    )
+
+  const refundStatus =
+    isFullRefund
+      ? 'full'
+      : 'partial'
+
+  const updates = {
+    refunded_amount_cents:
+      refundedAmount,
+
+    refund_status:
+      refundStatus,
+
+    refunded_at:
+      new Date().toISOString(),
+  }
+
+  /*
+   * Keep the original payment status/history intact.
+   * `status = paid` means the Checkout payment was
+   * originally completed successfully.
+   *
+   * refund_status separately records what happened
+   * afterward.
+   */
+
+  const { error: updateError } =
+    await admin
+      .from('purchases')
+      .update(updates)
+      .eq('id', purchase.id)
+
+  if (updateError) {
+    throw updateError
+  }
+
+  console.log(
+    'Stripe refund recorded.',
+    {
+      purchaseId: purchase.id,
+      paymentIntentId,
+      refundedAmount,
+      refundStatus,
+    }
+  )
+}
+
+/*
+ * -------------------------------------------------------
+ * SUBSCRIPTION STATE
+ * -------------------------------------------------------
  */
 
 async function activateSubscription(
@@ -765,11 +865,6 @@ async function touchSubscription(
       new Date().toISOString(),
   }
 
-  /*
-   * When the complete Stripe subscription
-   * object is available, also synchronize its
-   * scheduled cancellation state.
-   */
   if (
     typeof subscription ===
     'object'
@@ -814,10 +909,6 @@ async function syncSubscription(
     'incomplete_expired',
   ]
 
-  /*
-   * Only terminal Stripe states revoke
-   * training access.
-   */
   if (
     terminalStatuses.includes(
       subscription.status
@@ -849,11 +940,6 @@ async function syncSubscription(
     return
   }
 
-  /*
-   * Preserve access during non-terminal
-   * billing states such as past_due while
-   * still synchronizing cancellation state.
-   */
   await touchSubscription(
     admin,
     subscription
@@ -917,13 +1003,6 @@ async function handleInvoicePaid(
     return
   }
 
-  /*
-   * Active/trialing subscriptions are restored
-   * normally.
-   *
-   * past_due subscriptions retain access while
-   * Stripe is still resolving payment.
-   */
   if (
     subscription.status ===
     'past_due'
@@ -956,14 +1035,6 @@ async function handleInvoicePaymentFailed(
 
   if (!subscriptionId) return
 
-  /*
-   * Do not revoke access for an individual
-   * failed payment. Stripe may still retry.
-   *
-   * Retrieve the subscription when possible
-   * so scheduled cancellation information
-   * remains synchronized as well.
-   */
   try {
     const subscription =
       await stripe.subscriptions.retrieve(
@@ -1070,15 +1141,23 @@ export async function POST(
         )
         break
 
-      case 'customer.subscription.updated':
+      case 'charge.refunded':
         /*
-         * Includes:
+         * Record full and partial refunds against
+         * the original iTrainSpeed purchase.
          *
-         * - normal subscription updates
-         * - cancel_at_period_end being enabled
-         * - scheduled cancellation being undone
-         * - Stripe billing-status changes
+         * Entitlement revocation is deliberately
+         * handled separately until purchases and
+         * entitlements have an explicit relational
+         * link.
          */
+        await handleChargeRefunded(
+          admin,
+          event.data.object
+        )
+        break
+
+      case 'customer.subscription.updated':
         await syncSubscription(
           admin,
           event.data.object
@@ -1086,10 +1165,6 @@ export async function POST(
         break
 
       case 'customer.subscription.deleted':
-        /*
-         * Stripe has actually terminated the
-         * recurring subscription.
-         */
         await deactivateSubscription(
           admin,
           event.data.object.id
@@ -1097,10 +1172,6 @@ export async function POST(
         break
 
       case 'invoice.paid':
-        /*
-         * Verify the subscription itself before
-         * restoring access.
-         */
         await handleInvoicePaid(
           admin,
           stripe,
@@ -1109,10 +1180,6 @@ export async function POST(
         break
 
       case 'invoice.payment_failed':
-        /*
-         * Preserve access during Stripe's
-         * payment retry/dunning period.
-         */
         await handleInvoicePaymentFailed(
           admin,
           stripe,
