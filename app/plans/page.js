@@ -331,15 +331,6 @@ function PlansContent() {
    * -------------------------------------------------------
    * STRIPE CUSTOMER PORTAL
    * -------------------------------------------------------
-   *
-   * Stripe hosts the billing-management
-   * interface.
-   *
-   * Parents can update their payment method
-   * and manage recurring subscriptions there.
-   *
-   * Stripe webhook events keep Supabase in
-   * sync with subscription changes.
    */
 
   async function openBillingPortal() {
@@ -406,10 +397,6 @@ function PlansContent() {
    * -------------------------------------------------------
    * BOOKING LINKS
    * -------------------------------------------------------
-   *
-   * Passing the entitlement ID ensures that
-   * booking uses the exact access selected
-   * by the customer.
    */
 
   function bookUrl(e) {
@@ -466,10 +453,6 @@ function PlansContent() {
    */
 
   function accessStatus(e) {
-    /*
-     * Subscription is scheduled to cancel
-     * at the end of its paid billing period.
-     */
     if (
       e.cancel_at_period_end &&
       e.cancellation_effective_at
@@ -479,30 +462,18 @@ function PlansContent() {
       )}`
     }
 
-    /*
-     * Fallback in case Stripe tells us
-     * cancellation is scheduled before the
-     * effective date has been populated.
-     */
     if (
       e.cancel_at_period_end
     ) {
       return 'Cancellation scheduled'
     }
 
-    /*
-     * Recurring subscription with no
-     * scheduled cancellation.
-     */
     if (
       e.stripe_subscription_id
     ) {
       return 'Active recurring membership'
     }
 
-    /*
-     * Fixed-duration access.
-     */
     if (e.expires_at) {
       return `Valid through ${formatDate(
         e.expires_at
@@ -535,51 +506,71 @@ function PlansContent() {
           </p>
         </div>
 
-<div
-  className="inlineActions"
-  style={{
-    alignItems: 'stretch',
-  }}
->
-  <Link
-    className="ctaLink"
-    href="/booking"
-    style={{
-      minWidth: '134px',
-      height: '60px',
-      display: 'inline-flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      boxSizing: 'border-box',
-      whiteSpace: 'nowrap',
-    }}
-  >
-    Book Training
-  </Link>
+        {/*
+         * Keep these two primary actions
+         * identical in height and alignment.
+         *
+         * Explicit margin: 0 prevents the
+         * global .secondary button style from
+         * pushing Manage Billing downward.
+         */}
+        <div
+          className="inlineActions"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'flex-end',
+            gap: '10px',
+            flexWrap: 'wrap',
+          }}
+        >
+          <Link
+            className="ctaLink"
+            href="/booking"
+            style={{
+              minWidth: '140px',
+              height: '60px',
+              minHeight: '60px',
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              boxSizing: 'border-box',
+              whiteSpace: 'nowrap',
+              margin: 0,
+              padding: '0 18px',
+              lineHeight: 1,
+            }}
+          >
+            Book Training
+          </Link>
 
-  <button
-    className="secondary"
-    onClick={
-      openBillingPortal
-    }
-    disabled={
-      openingPortal
-    }
-    style={{
-      minWidth: '142px',
-      height: '60px',
-      display: 'inline-flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      boxSizing: 'border-box',
-      whiteSpace: 'nowrap',
-    }}
-  >
-    {openingPortal
-      ? 'Opening Billing...'
-      : 'Manage Billing'}
-  </button>
-</div>
+          <button
+            className="secondary"
+            onClick={
+              openBillingPortal
+            }
+            disabled={
+              openingPortal
+            }
+            style={{
+              minWidth: '148px',
+              height: '60px',
+              minHeight: '60px',
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              boxSizing: 'border-box',
+              whiteSpace: 'nowrap',
+              margin: 0,
+              padding: '0 18px',
+              lineHeight: 1,
+            }}
+          >
+            {openingPortal
+              ? 'Opening Billing...'
+              : 'Manage Billing'}
+          </button>
+        </div>
       </div>
 
       {msg && (
