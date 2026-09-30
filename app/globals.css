@@ -56,6 +56,7 @@ header {
 header img {
   display: block;
   max-width: 100%;
+  height: auto;
 }
 
 
@@ -68,9 +69,8 @@ main {
   margin: auto;
 
   /*
-   * Reserve enough room for the fixed
-   * navigation without creating a large
-   * empty area at the bottom.
+   * Reserve room for the fixed navigation
+   * without creating excessive whitespace.
    */
   padding: 28px 20px 88px;
 }
@@ -746,14 +746,14 @@ select {
 
   header {
     /*
-     * Give iPhones room above the logo for
-     * the notch / Dynamic Island.
+     * Protect the header from the iPhone
+     * notch / Dynamic Island.
      */
     height: auto;
 
     min-height:
       calc(
-        72px +
+        96px +
         env(safe-area-inset-top)
       );
 
@@ -767,13 +767,20 @@ select {
   }
 
   /*
-   * Larger mobile logo while preserving
-   * the safe-area fix.
+   * The logo image is now tightly cropped,
+   * so 220px represents the actual visible
+   * iTrainSpeed branding rather than a
+   * large white image canvas.
    */
   header img {
     display: block;
-    width: 145px;
-    max-height: 54px;
+
+    width: 220px;
+    max-width: 70vw;
+
+    height: auto;
+    max-height: 100px;
+
     object-fit: contain;
   }
 
@@ -967,9 +974,16 @@ select {
     padding-right: 12px;
   }
 
+  /*
+   * Still prominent on smaller phones
+   * without overflowing the screen.
+   */
   header img {
-    width: 135px;
-    max-height: 52px;
+    width: 200px;
+    max-width: 72vw;
+
+    height: auto;
+    max-height: 92px;
   }
 
   .hero {
