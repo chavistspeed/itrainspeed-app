@@ -6,10 +6,15 @@ import {
   useMemo,
   useState,
 } from 'react'
-import { useSearchParams } from 'next/navigation'
+import {
+  useRouter,
+  useSearchParams,
+} from 'next/navigation'
 import Link from 'next/link'
 import AppShell from '../../components/AppShell'
 import { supabase } from '../../lib/supabase'
+
+const CURRENT_WAIVER_VERSION = '2026-01'
 
 const label = (type) =>
   ({
@@ -22,6 +27,7 @@ const label = (type) =>
   'Training')
 
 function BookingContent() {
+  const router = useRouter()
   const params = useSearchParams()
 
   const requestedType =
@@ -54,14 +60,65 @@ function BookingContent() {
   const [msg, setMsg] =
     useState('')
 
+  const [accessChecked, setAccessChecked] =
+    useState(false)
+
   async function loadBase() {
     const s = supabase()
+
+    if (!s) {
+      router.replace('/login')
+      return false
+    }
 
     const {
       data: { user },
     } = await s.auth.getUser()
 
-    if (!user) return
+    if (!user) {
+      router.replace('/login')
+      return false
+    }
+
+    /*
+     * WAIVER GUARDRAIL
+     *
+     * Booking is only available after the
+     * parent/guardian has accepted the current
+     * participation waiver.
+     *
+     * The database RPC also enforces this rule.
+     */
+    const {
+      data: profile,
+      error: profileError,
+    } = await s
+      .from('profiles')
+      .select(
+        'waiver_accepted_at, waiver_version'
+      )
+      .eq('id', user.id)
+      .single()
+
+    if (profileError) {
+      setMsg(
+        'We could not verify your participation waiver. Please try again.'
+      )
+      setAccessChecked(true)
+      return false
+    }
+
+    const waiverComplete =
+      Boolean(
+        profile?.waiver_accepted_at &&
+        profile?.waiver_version ===
+          CURRENT_WAIVER_VERSION
+      )
+
+    if (!waiverComplete) {
+      router.replace('/waiver')
+      return false
+    }
 
     const [
       { data: athleteData },
@@ -138,6 +195,10 @@ function BookingContent() {
         athleteList?.[0]?.id ||
         ''
     )
+
+    setAccessChecked(true)
+
+    return true
   }
 
   useEffect(() => {
@@ -146,7 +207,14 @@ function BookingContent() {
 
   useEffect(() => {
     async function loadBooked() {
-      if (!athlete) {
+      /*
+       * Do not query booking information until
+       * the waiver/authentication check passes.
+       */
+      if (
+        !accessChecked ||
+        !athlete
+      ) {
         setBooked(new Set())
         return
       }
@@ -172,7 +240,10 @@ function BookingContent() {
     }
 
     loadBooked()
-  }, [athlete])
+  }, [
+    athlete,
+    accessChecked,
+  ])
 
   function sessionServiceType(session) {
     return (
@@ -216,18 +287,18 @@ function BookingContent() {
    * package without hard-coding package names.
    */
   const lockedAthleteId =
-  requestedEntitlementRecord?.athlete_id ||
-  requestedAthlete ||
-  ''
+    requestedEntitlementRecord?.athlete_id ||
+    requestedAthlete ||
+    ''
 
   const athleteLocked =
-  Boolean(
-    requestedEntitlement &&
-    (
-      lockedAthleteId ||
-      requestedAthlete
+    Boolean(
+      requestedEntitlement &&
+      (
+        lockedAthleteId ||
+        requestedAthlete
+      )
     )
-  )
 
   /*
    * Keep the selected athlete synchronized
@@ -323,7 +394,10 @@ function BookingContent() {
         selectedEntitlement.credit_type
       )
     }
-  }, [selectedEntitlement, filter])
+  }, [
+    selectedEntitlement,
+    filter,
+  ])
 
   const eligibleSessions =
     sessions.filter((session) => {
@@ -445,8 +519,10 @@ function BookingContent() {
       await supabase().rpc(
         'book_session_v15',
         {
-          p_session_id: sessionId,
-          p_athlete_id: athlete,
+          p_session_id:
+            sessionId,
+          p_athlete_id:
+            athlete,
           p_entitlement_id:
             selectedEntitlement?.id ||
             null,
@@ -454,6 +530,22 @@ function BookingContent() {
       )
 
     if (error) {
+      /*
+       * If the waiver somehow changed or became
+       * outdated after the page was loaded,
+       * send the customer back to the waiver.
+       */
+      if (
+        error.message
+          ?.toLowerCase()
+          .includes(
+            'participation waiver'
+          )
+      ) {
+        router.replace('/waiver')
+        return
+      }
+
       setMsg(error.message)
       return
     }
@@ -484,11 +576,37 @@ function BookingContent() {
     )
   }
 
+  /*
+   * Prevent the booking interface from briefly
+   * flashing before authentication/waiver
+   * verification finishes.
+   */
+  if (!accessChecked) {
+    return (
+      <AppShell title="Book Training">
+        <div className="pageTitleRow">
+          <div>
+            <h1>
+              Book training
+            </h1>
+
+            <p className="subtle">
+              Checking your training
+              access...
+            </p>
+          </div>
+        </div>
+      </AppShell>
+    )
+  }
+
   return (
     <AppShell title="Book Training">
       <div className="pageTitleRow">
         <div>
-          <h1>Book training</h1>
+          <h1>
+            Book training
+          </h1>
 
           <p className="subtle">
             Only sessions your athlete
@@ -506,19 +624,20 @@ function BookingContent() {
         <label>
           Booking for
 
-{athleteLocked ? (
-  <div className="lockedBookingField">
-    <b>
-      {selectedAthlete
-        ? `${selectedAthlete.first_name} ${selectedAthlete.last_name || ''}`
-        : 'Selected athlete'}
-    </b>
+          {athleteLocked ? (
+            <div className="lockedBookingField">
+              <b>
+                {selectedAthlete
+                  ? `${selectedAthlete.first_name} ${selectedAthlete.last_name || ''}`
+                  : 'Selected athlete'}
+              </b>
 
-    <small>
-      Athlete locked to this training access
-    </small>
-  </div>
-) : (
+              <small>
+                Athlete locked to this
+                training access
+              </small>
+            </div>
+          ) : (
             <select
               value={athlete}
               onChange={(event) =>
@@ -637,7 +756,9 @@ function BookingContent() {
               )
 
             const isBooked =
-              booked.has(session.id)
+              booked.has(
+                session.id
+              )
 
             return (
               <article
@@ -682,8 +803,11 @@ function BookingContent() {
                       session.booked_count
                     }
                     /{session.capacity}{' '}
-                    booked • Eligible with{' '}
-                    {label(serviceType)}
+                    booked • Eligible
+                    with{' '}
+                    {label(
+                      serviceType
+                    )}
                   </span>
                 </div>
 
@@ -698,7 +822,9 @@ function BookingContent() {
                     isBooked
                   }
                   onClick={() =>
-                    book(session.id)
+                    book(
+                      session.id
+                    )
                   }
                 >
                   {isBooked
@@ -722,7 +848,8 @@ function BookingContent() {
             <br />
 
             <Link href="/plans">
-              View plans &amp; access →
+              View plans &amp;
+              access →
             </Link>
           </div>
         )}
@@ -743,8 +870,8 @@ export default function Booking() {
               </h1>
 
               <p className="subtle">
-                Loading your available
-                training...
+                Loading your
+                available training...
               </p>
             </div>
           </div>
