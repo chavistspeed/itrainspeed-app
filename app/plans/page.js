@@ -535,28 +535,51 @@ function PlansContent() {
           </p>
         </div>
 
-        <div className="inlineActions">
-          <Link
-            className="ctaLink"
-            href="/booking"
-          >
-            Book Training
-          </Link>
+<div
+  className="inlineActions"
+  style={{
+    alignItems: 'stretch',
+  }}
+>
+  <Link
+    className="ctaLink"
+    href="/booking"
+    style={{
+      minWidth: '134px',
+      height: '60px',
+      display: 'inline-flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      boxSizing: 'border-box',
+      whiteSpace: 'nowrap',
+    }}
+  >
+    Book Training
+  </Link>
 
-          <button
-            className="secondary"
-            onClick={
-              openBillingPortal
-            }
-            disabled={
-              openingPortal
-            }
-          >
-            {openingPortal
-              ? 'Opening Billing...'
-              : 'Manage Billing'}
-          </button>
-        </div>
+  <button
+    className="secondary"
+    onClick={
+      openBillingPortal
+    }
+    disabled={
+      openingPortal
+    }
+    style={{
+      minWidth: '142px',
+      height: '60px',
+      display: 'inline-flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      boxSizing: 'border-box',
+      whiteSpace: 'nowrap',
+    }}
+  >
+    {openingPortal
+      ? 'Opening Billing...'
+      : 'Manage Billing'}
+  </button>
+</div>
       </div>
 
       {msg && (
