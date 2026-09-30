@@ -750,9 +750,10 @@ select {
      * the notch / Dynamic Island.
      */
     height: auto;
+
     min-height:
       calc(
-        64px +
+        72px +
         env(safe-area-inset-top)
       );
 
@@ -765,10 +766,14 @@ select {
       8px;
   }
 
+  /*
+   * Larger mobile logo while preserving
+   * the safe-area fix.
+   */
   header img {
     display: block;
-    width: 118px;
-    max-height: 46px;
+    width: 145px;
+    max-height: 54px;
     object-fit: contain;
   }
 
@@ -963,7 +968,8 @@ select {
   }
 
   header img {
-    width: 110px;
+    width: 135px;
+    max-height: 52px;
   }
 
   .hero {
