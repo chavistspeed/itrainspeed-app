@@ -9,10 +9,12 @@
 
 html {
   -webkit-text-size-adjust: 100%;
+  background: #f5f6f8;
 }
 
 body {
   margin: 0;
+  min-height: 100dvh;
   background: #f5f6f8;
   color: #15171a;
   font-family: Arial, Helvetica, sans-serif;
@@ -35,7 +37,7 @@ select {
    ========================================================= */
 
 header {
-  height: 82px;
+  min-height: 82px;
   background: #fff;
   border-bottom: 1px solid #e5e7eb;
 
@@ -51,6 +53,11 @@ header {
   font-weight: 800;
 }
 
+header img {
+  display: block;
+  max-width: 100%;
+}
+
 
 /* =========================================================
    MAIN LAYOUT
@@ -61,10 +68,11 @@ main {
   margin: auto;
 
   /*
-   * Extra bottom space prevents the fixed
-   * navigation from covering page content.
+   * Reserve enough room for the fixed
+   * navigation without creating a large
+   * empty area at the bottom.
    */
-  padding: 28px 20px 110px;
+  padding: 28px 20px 88px;
 }
 
 h1 {
@@ -106,14 +114,12 @@ h2 {
 
 .stats {
   display: grid;
-  grid-template-columns:
-    repeat(3, 1fr);
+  grid-template-columns: repeat(3, 1fr);
   gap: 10px;
 }
 
 .walletStats {
-  grid-template-columns:
-    repeat(5, 1fr);
+  grid-template-columns: repeat(5, 1fr);
 }
 
 .stats div {
@@ -328,15 +334,13 @@ select {
 
 .grid2 {
   display: grid;
-  grid-template-columns:
-    1fr 1fr;
+  grid-template-columns: 1fr 1fr;
   gap: 24px;
 }
 
 .form2 {
   display: grid;
-  grid-template-columns:
-    1fr 1fr;
+  grid-template-columns: 1fr 1fr;
   gap: 12px;
 }
 
@@ -408,7 +412,7 @@ select {
    ========================================================= */
 
 .auth {
-  min-height: 100vh;
+  min-height: 100dvh;
 
   display: flex;
   flex-direction: column;
@@ -432,7 +436,7 @@ select {
 }
 
 .center {
-  height: 100vh;
+  min-height: 100dvh;
   display: grid;
   place-items: center;
   font-weight: 800;
@@ -527,8 +531,7 @@ select {
 
   padding: 14px 0;
 
-  border-bottom:
-    1px solid #eceef0;
+  border-bottom: 1px solid #eceef0;
 }
 
 .rosterRow:last-child {
@@ -561,8 +564,7 @@ select {
   background: #fff;
   color: #555;
 
-  border:
-    1px solid #d8dbe0;
+  border: 1px solid #d8dbe0;
 }
 
 .activeTab {
@@ -658,6 +660,25 @@ select {
 
 
 /* =========================================================
+   SUPPORT / POLICIES
+   ========================================================= */
+
+.supportGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.supportCard h2 {
+  margin-top: 0;
+}
+
+.supportCard p:last-child {
+  margin-bottom: 0;
+}
+
+
+/* =========================================================
    BOTTOM NAVIGATION
    ========================================================= */
 
@@ -668,9 +689,6 @@ select {
   left: 0;
   right: 0;
 
-  /*
-   * iOS safe-area support.
-   */
   min-height: 68px;
 
   padding:
@@ -684,8 +702,7 @@ select {
     0.98
   );
 
-  border-top:
-    1px solid #ddd;
+  border-top: 1px solid #ddd;
 
   display: flex;
   justify-content: center;
@@ -702,7 +719,7 @@ select {
   font-weight: 700;
   font-size: 13px;
 
-  min-width: 110px;
+  min-width: 100px;
 
   display: flex;
   align-items: center;
@@ -710,10 +727,9 @@ select {
 
   text-align: center;
 
-  padding: 0 12px;
+  padding: 0 10px;
 
-  border-top:
-    3px solid transparent;
+  border-top: 3px solid transparent;
 }
 
 .bottom a.active {
@@ -729,20 +745,35 @@ select {
 @media (max-width: 700px) {
 
   header {
-    height: 70px;
+    /*
+     * Give iPhones room above the logo for
+     * the notch / Dynamic Island.
+     */
+    height: auto;
+    min-height:
+      calc(
+        64px +
+        env(safe-area-inset-top)
+      );
+
     padding:
-      4px 16px;
+      calc(
+        8px +
+        env(safe-area-inset-top)
+      )
+      16px
+      8px;
   }
 
   header img {
-    width: 125px;
-    height: auto;
+    display: block;
+    width: 118px;
+    max-height: 46px;
+    object-fit: contain;
   }
 
   /*
    * Logo is enough on smaller screens.
-   * The page itself already provides its
-   * heading.
    */
   header span {
     display: none;
@@ -750,12 +781,11 @@ select {
 
   main {
     padding:
-      20px 16px
+      18px
+      16px
       calc(
-        100px +
-        env(
-          safe-area-inset-bottom
-        )
+        78px +
+        env(safe-area-inset-bottom)
       );
   }
 
@@ -830,7 +860,8 @@ select {
 
   .grid2,
   .form2,
-  .bookingFilters {
+  .bookingFilters,
+  .supportGrid {
     grid-template-columns: 1fr;
   }
 
@@ -896,23 +927,26 @@ select {
   /* Bottom navigation */
 
   .bottom {
-    justify-content:
-      space-around;
+    min-height: 64px;
+
+    justify-content: space-around;
 
     gap: 0;
 
-    padding-left: 4px;
-    padding-right: 4px;
+    padding:
+      0
+      4px
+      env(safe-area-inset-bottom);
   }
 
   .bottom a {
     min-width: 0;
     flex: 1;
 
-    font-size: 11px;
-    line-height: 1.15;
+    font-size: 10px;
+    line-height: 1.1;
 
-    padding: 0 4px;
+    padding: 0 3px;
   }
 }
 
@@ -928,6 +962,10 @@ select {
     padding-right: 12px;
   }
 
+  header img {
+    width: 110px;
+  }
+
   .hero {
     padding: 17px;
   }
@@ -937,6 +975,8 @@ select {
   }
 
   .bottom a {
-    font-size: 10px;
+    font-size: 9px;
+    padding-left: 2px;
+    padding-right: 2px;
   }
 }
