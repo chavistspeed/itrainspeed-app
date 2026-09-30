@@ -41,20 +41,17 @@ export default function Nav() {
       href: '/dashboard',
       label: 'Home',
     },
-
     {
       href: '/booking',
-      label: 'Book Training',
+      label: 'Book',
     },
-
     {
       href: '/athletes',
       label: 'Athletes',
     },
-
     {
       href: '/plans',
-      label: 'My Training',
+      label: 'Training',
     },
   ]
 
@@ -72,14 +69,18 @@ export default function Nav() {
     })
   }
 
+  /*
+   * Help is available to every signed-in
+   * customer, coach, and admin.
+   */
+  items.push({
+    href: '/support',
+    label: 'Help',
+  })
+
   function isActive(href) {
-    if (
-      href === '/dashboard'
-    ) {
-      return (
-        pathname ===
-        '/dashboard'
-      )
+    if (href === '/dashboard') {
+      return pathname === '/dashboard'
     }
 
     return (
