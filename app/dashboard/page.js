@@ -7,6 +7,7 @@ import AppShell from '../../components/AppShell'
 import { supabase } from '../../lib/supabase'
 
 const CANCELLATION_WINDOW_HOURS = 6
+const CURRENT_WAIVER_VERSION = '2026-01'
 
 function formatDate(value) {
   if (!value) return ''
@@ -154,15 +155,6 @@ export default function Dashboard() {
       upcomingBookings
     )
 
-    /*
-     * Keep active unlimited memberships and
-     * active credit packages that still have
-     * usable sessions.
-     *
-     * Exhausted credit packages remain in
-     * Supabase for history but do not affect
-     * the customer dashboard.
-     */
     setEnts(
       (e || []).filter(
         (entitlement) => {
@@ -247,11 +239,20 @@ export default function Dashboard() {
     router.replace('/login')
   }
 
-  /*
-   * -------------------------------------------------------
-   * ACTIVE ACCESS
-   * -------------------------------------------------------
-   */
+  const waiverComplete =
+    Boolean(
+      profile?.waiver_accepted_at &&
+      profile?.waiver_version ===
+        CURRENT_WAIVER_VERSION
+    )
+
+  function bookingHref(
+    href = '/booking'
+  ) {
+    return waiverComplete
+      ? href
+      : '/waiver'
+  }
 
   const groupEntitlements =
     ents.filter(
@@ -274,14 +275,6 @@ export default function Dashboard() {
         'track'
     )
 
-  /*
-   * Family Group credits do not have an
-   * athlete_id.
-   *
-   * Athlete-specific Group memberships such
-   * as Founding Athlete Membership must not
-   * inflate the family's Group credit balance.
-   */
   const sharedGroupEntitlements =
     groupEntitlements.filter(
       (e) =>
@@ -329,10 +322,6 @@ export default function Dashboard() {
           0
         )
 
-  /*
-   * Athlete-specific unlimited Group
-   * memberships.
-   */
   const unlimitedGroupAthletes =
     athleteGroupMemberships.map(
       (entitlement) => {
@@ -464,7 +453,9 @@ export default function Dashboard() {
 
           <Link
             className="heroCta"
-            href="/booking"
+            href={bookingHref(
+              '/booking'
+            )}
           >
             Book Training
           </Link>
@@ -487,11 +478,74 @@ export default function Dashboard() {
       )}
 
 
-      {/*
-       * ---------------------------------------------------
-       * UNLIMITED GROUP MEMBERSHIPS
-       * ---------------------------------------------------
-       */}
+      <section>
+
+        <div className="row">
+          <h2>
+            Participation Waiver
+          </h2>
+
+          <Link href="/waiver">
+            {waiverComplete
+              ? 'View waiver'
+              : 'Complete waiver'}
+          </Link>
+        </div>
+
+        {waiverComplete ? (
+          <div className="card">
+            <b>
+              ✓ Waiver Complete
+            </b>
+
+            <span>
+              Signed by{' '}
+              {
+                profile
+                  ?.waiver_signed_name
+              }
+            </span>
+
+            <span>
+              On file since{' '}
+              {formatDate(
+                profile
+                  ?.waiver_accepted_at
+              )}
+            </span>
+          </div>
+        ) : (
+          <div
+            className="card"
+            style={{
+              borderColor:
+                '#ff525d',
+            }}
+          >
+            <b>
+              Participation Waiver Required
+            </b>
+
+            <span>
+              Complete your one-time
+              family participation waiver
+              before booking training.
+            </span>
+
+            <Link
+              className="miniCta"
+              href="/waiver"
+              style={{
+                marginTop: 12,
+              }}
+            >
+              Complete Waiver
+            </Link>
+          </div>
+        )}
+
+      </section>
+
 
       {unlimitedGroupAthletes.length >
         0 && (
@@ -540,7 +594,9 @@ export default function Dashboard() {
 
                 <Link
                   className="miniCta"
-                  href={`/booking?athlete=${entitlement.athlete_id}&type=group&entitlement=${entitlement.id}`}
+                  href={bookingHref(
+                    `/booking?athlete=${entitlement.athlete_id}&type=group&entitlement=${entitlement.id}`
+                  )}
                 >
                   Book Training
                 </Link>
@@ -551,12 +607,6 @@ export default function Dashboard() {
         </section>
       )}
 
-
-      {/*
-       * ---------------------------------------------------
-       * ATHLETES
-       * ---------------------------------------------------
-       */}
 
       <section>
 
@@ -605,7 +655,9 @@ export default function Dashboard() {
 
                 <Link
                   className="miniCta"
-                  href={`/booking?athlete=${athlete.id}`}
+                  href={bookingHref(
+                    `/booking?athlete=${athlete.id}`
+                  )}
                 >
                   Book Training
                 </Link>
@@ -623,12 +675,6 @@ export default function Dashboard() {
       </section>
 
 
-      {/*
-       * ---------------------------------------------------
-       * UPCOMING TRAINING
-       * ---------------------------------------------------
-       */}
-
       <section>
 
         <div className="row">
@@ -636,7 +682,11 @@ export default function Dashboard() {
             Upcoming training
           </h2>
 
-          <Link href="/booking">
+          <Link
+            href={bookingHref(
+              '/booking'
+            )}
+          >
             Book training
           </Link>
         </div>
@@ -766,12 +816,6 @@ export default function Dashboard() {
 
       </section>
 
-
-      {/*
-       * ---------------------------------------------------
-       * COACH / ADMIN ACCESS
-       * ---------------------------------------------------
-       */}
 
       {profile?.role !==
         'parent' && (
