@@ -157,21 +157,17 @@ export default function WaiverPage() {
     const acceptedAt =
       new Date().toISOString()
 
-    const { error } = await s
-      .from('profiles')
-      .update({
-        waiver_accepted_at:
-          acceptedAt,
-        waiver_signed_name:
-          signedName.trim(),
-        waiver_version:
-          WAIVER_VERSION,
-        media_consent:
-          mediaConsent === 'yes',
-        media_consent_at:
-          acceptedAt,
-      })
-      .eq('id', user.id)
+    const { error } = await s.rpc(
+  'sign_parent_waiver_v1',
+  {
+    p_signed_name:
+      signedName.trim(),
+    p_media_consent:
+      mediaConsent === 'yes',
+    p_waiver_version:
+      WAIVER_VERSION,
+  }
+)
 
     if (error) {
       setErrorMsg(error.message)
