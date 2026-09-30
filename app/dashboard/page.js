@@ -6,6 +6,8 @@ import Link from 'next/link'
 import AppShell from '../../components/AppShell'
 import { supabase } from '../../lib/supabase'
 
+const CANCELLATION_WINDOW_HOURS = 6
+
 function formatDate(value) {
   if (!value) return ''
 
@@ -19,12 +21,54 @@ function formatDate(value) {
   )
 }
 
+function canCancelBooking(startAt) {
+  if (!startAt) return false
+
+  const startTime =
+    new Date(startAt).getTime()
+
+  const now = Date.now()
+
+  const cancellationDeadline =
+    startTime -
+    CANCELLATION_WINDOW_HOURS *
+      60 *
+      60 *
+      1000
+
+  return now <= cancellationDeadline
+}
+
+function cancellationDeadline(startAt) {
+  if (!startAt) return ''
+
+  const deadline =
+    new Date(startAt).getTime() -
+    CANCELLATION_WINDOW_HOURS *
+      60 *
+      60 *
+      1000
+
+  return new Date(
+    deadline
+  ).toLocaleString()
+}
+
 export default function Dashboard() {
-  const [profile, setProfile] = useState(null)
-  const [athletes, setAthletes] = useState([])
-  const [bookings, setBookings] = useState([])
-  const [ents, setEnts] = useState([])
-  const [msg, setMsg] = useState('')
+  const [profile, setProfile] =
+    useState(null)
+
+  const [athletes, setAthletes] =
+    useState([])
+
+  const [bookings, setBookings] =
+    useState([])
+
+  const [ents, setEnts] =
+    useState([])
+
+  const [msg, setMsg] =
+    useState('')
 
   const router = useRouter()
 
@@ -86,26 +130,29 @@ export default function Dashboard() {
 
     setProfile(p)
     setAthletes(a || [])
-    const upcomingBookings =
-  (b || [])
-    .filter(
-      (booking) =>
-        booking.sessions?.start_at &&
-        new Date(
-          booking.sessions.start_at
-        ) > new Date()
-    )
-    .sort(
-      (a, b) =>
-        new Date(
-          a.sessions.start_at
-        ) -
-        new Date(
-          b.sessions.start_at
-        )
-    )
 
-setBookings(upcomingBookings)
+    const upcomingBookings =
+      (b || [])
+        .filter(
+          (booking) =>
+            booking.sessions?.start_at &&
+            new Date(
+              booking.sessions.start_at
+            ) > new Date()
+        )
+        .sort(
+          (a, b) =>
+            new Date(
+              a.sessions.start_at
+            ) -
+            new Date(
+              b.sessions.start_at
+            )
+        )
+
+    setBookings(
+      upcomingBookings
+    )
 
     /*
      * Keep active unlimited memberships and
@@ -129,13 +176,16 @@ setBookings(upcomingBookings)
             return false
           }
 
-          if (entitlement.unlimited) {
+          if (
+            entitlement.unlimited
+          ) {
             return true
           }
 
           return (
             Number(
-              entitlement.credits_remaining ||
+              entitlement
+                .credits_remaining ||
                 0
             ) > 0
           )
@@ -144,21 +194,40 @@ setBookings(upcomingBookings)
     )
   }
 
-  async function cancel(id) {
+  async function cancel(
+    booking
+  ) {
+    const startAt =
+      booking.sessions?.start_at
+
+    if (
+      !canCancelBooking(
+        startAt
+      )
+    ) {
+      setMsg(
+        'The cancellation window for this session has closed. Training sessions must be cancelled at least 6 hours before the scheduled start time.'
+      )
+
+      return
+    }
+
     if (
       !confirm(
-        'Cancel this booking and return the training credit?'
+        'Cancel this booking? Your training credit will be returned to your account.'
       )
     ) {
       return
     }
 
-    const { error } = await supabase().rpc(
-      'cancel_booking_v14',
-      {
-        p_booking_id: id,
-      }
-    )
+    const { error } =
+      await supabase().rpc(
+        'cancel_booking_v14',
+        {
+          p_booking_id:
+            booking.id,
+        }
+      )
 
     setMsg(
       error
@@ -172,7 +241,9 @@ setBookings(upcomingBookings)
   }
 
   async function out() {
-    await supabase()?.auth.signOut()
+    await supabase()
+      ?.auth.signOut()
+
     router.replace('/login')
   }
 
@@ -185,19 +256,22 @@ setBookings(upcomingBookings)
   const groupEntitlements =
     ents.filter(
       (e) =>
-        e.credit_type === 'group'
+        e.credit_type ===
+        'group'
     )
 
   const privateEntitlements =
     ents.filter(
       (e) =>
-        e.credit_type === 'private'
+        e.credit_type ===
+        'private'
     )
 
   const trackEntitlements =
     ents.filter(
       (e) =>
-        e.credit_type === 'track'
+        e.credit_type ===
+        'track'
     )
 
   /*
@@ -210,7 +284,8 @@ setBookings(upcomingBookings)
    */
   const sharedGroupEntitlements =
     groupEntitlements.filter(
-      (e) => !e.athlete_id
+      (e) =>
+        !e.athlete_id
     )
 
   const athleteGroupMemberships =
@@ -222,10 +297,14 @@ setBookings(upcomingBookings)
 
   const sharedGroupCredits =
     sharedGroupEntitlements.reduce(
-      (total, entitlement) =>
+      (
+        total,
+        entitlement
+      ) =>
         total +
         Number(
-          entitlement.credits_remaining ||
+          entitlement
+            .credits_remaining ||
             0
         ),
       0
@@ -237,10 +316,14 @@ setBookings(upcomingBookings)
     )
       ? 'Unlimited'
       : privateEntitlements.reduce(
-          (total, entitlement) =>
+          (
+            total,
+            entitlement
+          ) =>
             total +
             Number(
-              entitlement.credits_remaining ||
+              entitlement
+                .credits_remaining ||
                 0
             ),
           0
@@ -257,7 +340,8 @@ setBookings(upcomingBookings)
           athletes.find(
             (a) =>
               a.id ===
-              entitlement.athlete_id
+              entitlement
+                .athlete_id
           )
 
         return {
@@ -267,7 +351,9 @@ setBookings(upcomingBookings)
       }
     )
 
-  function athleteName(athlete) {
+  function athleteName(
+    athlete
+  ) {
     if (!athlete) {
       return 'Athlete'
     }
@@ -307,8 +393,11 @@ setBookings(upcomingBookings)
 
   return (
     <AppShell title="Athlete Hub">
+
       <section className="hero">
-        <p>WELCOME BACK</p>
+        <p>
+          WELCOME BACK
+        </p>
 
         <h1>
           {profile?.full_name ||
@@ -316,6 +405,7 @@ setBookings(upcomingBookings)
         </h1>
 
         <div className="stats walletStats">
+
           <div>
             <b>
               {sharedGroupCredits}
@@ -367,9 +457,11 @@ setBookings(upcomingBookings)
               Upcoming
             </span>
           </div>
+
         </div>
 
         <div className="heroActions">
+
           <Link
             className="heroCta"
             href="/booking"
@@ -383,14 +475,17 @@ setBookings(upcomingBookings)
           >
             My Training Access
           </Link>
+
         </div>
       </section>
+
 
       {msg && (
         <div className="notice">
           {msg}
         </div>
       )}
+
 
       {/*
        * ---------------------------------------------------
@@ -401,6 +496,7 @@ setBookings(upcomingBookings)
       {unlimitedGroupAthletes.length >
         0 && (
         <section>
+
           <div className="row">
             <h2>
               Unlimited Group Training
@@ -418,7 +514,9 @@ setBookings(upcomingBookings)
             }) => (
               <div
                 className="card athleteAction"
-                key={entitlement.id}
+                key={
+                  entitlement.id
+                }
               >
                 <div>
                   <b>
@@ -449,8 +547,10 @@ setBookings(upcomingBookings)
               </div>
             )
           )}
+
         </section>
       )}
+
 
       {/*
        * ---------------------------------------------------
@@ -459,6 +559,7 @@ setBookings(upcomingBookings)
        */}
 
       <section>
+
         <div className="row">
           <h2>
             Your athletes
@@ -474,9 +575,12 @@ setBookings(upcomingBookings)
             (athlete) => (
               <div
                 className="card athleteAction"
-                key={athlete.id}
+                key={
+                  athlete.id
+                }
               >
                 <div>
+
                   <b>
                     {athleteName(
                       athlete
@@ -496,6 +600,7 @@ setBookings(upcomingBookings)
                     {athlete.sport ||
                       ''}
                   </span>
+
                 </div>
 
                 <Link
@@ -504,16 +609,19 @@ setBookings(upcomingBookings)
                 >
                   Book Training
                 </Link>
+
               </div>
             )
           )
         ) : (
           <div className="empty">
-            Add your first athlete to
-            start booking.
+            Add your first athlete
+            to start booking.
           </div>
         )}
+
       </section>
+
 
       {/*
        * ---------------------------------------------------
@@ -522,6 +630,7 @@ setBookings(upcomingBookings)
        */}
 
       <section>
+
         <div className="row">
           <h2>
             Upcoming training
@@ -535,22 +644,35 @@ setBookings(upcomingBookings)
         {bookings.length ? (
           bookings.map(
             (booking) => {
+
               const athlete =
                 athletes.find(
                   (a) =>
                     a.id ===
-                    booking.athlete_id
+                    booking
+                      .athlete_id
+                )
+
+              const cancellationOpen =
+                canCancelBooking(
+                  booking.sessions
+                    ?.start_at
                 )
 
               return (
                 <div
                   className="bookingRow card"
-                  key={booking.id}
+                  key={
+                    booking.id
+                  }
                 >
+
                   <div>
+
                     <b>
                       {
-                        booking.sessions
+                        booking
+                          .sessions
                           ?.programs
                           ?.name
                       }
@@ -574,24 +696,64 @@ setBookings(upcomingBookings)
                           )
                         : ''}
                     </span>
+
+                    {cancellationOpen ? (
+                      <span>
+                        Cancel by{' '}
+                        {cancellationDeadline(
+                          booking
+                            .sessions
+                            ?.start_at
+                        )}{' '}
+                        to have your
+                        training credit
+                        returned.
+                      </span>
+                    ) : (
+                      <span
+                        style={{
+                          color:
+                            '#b42318',
+                          fontWeight:
+                            700,
+                        }}
+                      >
+                        Cancellation
+                        window closed.
+                      </span>
+                    )}
+
                   </div>
 
                   <div className="bookingActions">
+
                     <span className="pill">
                       Booked
                     </span>
 
-                    <button
-                      className="dangerGhost"
-                      onClick={() =>
-                        cancel(
-                          booking.id
-                        )
-                      }
-                    >
-                      Cancel
-                    </button>
+                    {cancellationOpen ? (
+                      <button
+                        className="dangerGhost"
+                        onClick={() =>
+                          cancel(
+                            booking
+                          )
+                        }
+                      >
+                        Cancel
+                      </button>
+                    ) : (
+                      <button
+                        className="dangerGhost"
+                        disabled
+                        title="Sessions must be cancelled at least 6 hours before the scheduled start time."
+                      >
+                        Cancel
+                      </button>
+                    )}
+
                   </div>
+
                 </div>
               )
             }
@@ -601,7 +763,9 @@ setBookings(upcomingBookings)
             No upcoming bookings yet.
           </div>
         )}
+
       </section>
+
 
       {/*
        * ---------------------------------------------------
@@ -625,6 +789,7 @@ setBookings(upcomingBookings)
       >
         Sign out
       </button>
+
     </AppShell>
   )
 }
