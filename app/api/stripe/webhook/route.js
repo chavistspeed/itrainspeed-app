@@ -1,5 +1,6 @@
 import Stripe from 'stripe'
 import { createClient } from '@supabase/supabase-js'
+import nodemailer from 'nodemailer'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -154,6 +155,751 @@ function isAthleteAlreadyEnrolledError(
     error,
     'ATHLETE_ALREADY_ENROLLED'
   )
+}
+
+/*
+ * -------------------------------------------------------
+ * EMAIL HELPERS
+ * -------------------------------------------------------
+ */
+
+function escapeHtml(value) {
+  if (
+    value === null ||
+    value === undefined
+  ) {
+    return ''
+  }
+
+  return String(value)
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#039;')
+}
+
+function formatMoney(cents) {
+  const amount =
+    Number(cents || 0) / 100
+
+  return new Intl.NumberFormat(
+    'en-US',
+    {
+      style: 'currency',
+      currency: 'USD',
+    }
+  ).format(amount)
+}
+
+function formatPurchaseDate(
+  dateValue = new Date()
+) {
+  try {
+    return new Intl.DateTimeFormat(
+      'en-US',
+      {
+        timeZone:
+          'America/New_York',
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+        timeZoneName: 'short',
+      }
+    ).format(new Date(dateValue))
+  } catch {
+    return new Date(
+      dateValue
+    ).toISOString()
+  }
+}
+
+function getPaymentTypeLabel(
+  packageData
+) {
+  if (
+    packageData.payment_type ===
+    'subscription'
+  ) {
+    return 'Recurring Membership'
+  }
+
+  return 'One-Time Purchase'
+}
+
+async function sendPurchaseNotification(
+  admin,
+  session,
+  packageData
+) {
+  /*
+   * Email should never interfere with payment
+   * fulfillment. If SMTP fails, we log the failure
+   * but do not throw back into Stripe processing.
+   */
+
+  try {
+    const smtpHost =
+      process.env.SMTP_HOST
+
+    const smtpUser =
+      process.env.SMTP_USER
+
+    const smtpPass =
+      process.env.SMTP_PASS
+
+    const ownerEmail =
+      process.env
+        .OWNER_NOTIFICATION_EMAIL ||
+      'chavis@itrainspeed.com'
+
+    if (
+      !smtpHost ||
+      !smtpUser ||
+      !smtpPass
+    ) {
+      console.warn(
+        'Purchase notification skipped because SMTP configuration is incomplete.'
+      )
+
+      return
+    }
+
+    const guardianId =
+      session.metadata?.guardian_id
+
+    const athleteId =
+      session.metadata?.athlete_id ||
+      null
+
+    let guardianName =
+      'Parent / Guardian'
+
+    let guardianEmail =
+      session.customer_details?.email ||
+      session.customer_email ||
+      'Not available'
+
+    if (guardianId) {
+      const {
+        data: guardian,
+        error: guardianError,
+      } = await admin
+        .from('profiles')
+        .select('full_name')
+        .eq('id', guardianId)
+        .maybeSingle()
+
+      if (guardianError) {
+        console.warn(
+          'Unable to retrieve guardian for purchase notification:',
+          guardianError.message
+        )
+      }
+
+      if (guardian?.full_name) {
+        guardianName =
+          guardian.full_name
+      }
+    }
+
+    let athleteName =
+      'Family / Shared Access'
+
+    if (athleteId) {
+      const {
+        data: athlete,
+        error: athleteError,
+      } = await admin
+        .from('athletes')
+        .select(
+          'first_name, last_name'
+        )
+        .eq('id', athleteId)
+        .maybeSingle()
+
+      if (athleteError) {
+        console.warn(
+          'Unable to retrieve athlete for purchase notification:',
+          athleteError.message
+        )
+      }
+
+      if (athlete) {
+        athleteName = [
+          athlete.first_name,
+          athlete.last_name,
+        ]
+          .filter(Boolean)
+          .join(' ')
+          .trim()
+
+        if (!athleteName) {
+          athleteName =
+            'Athlete-specific Access'
+        }
+      }
+    }
+
+    const amountPaid =
+      session.amount_total ??
+      packageData.price_cents ??
+      0
+
+    const amount =
+      formatMoney(amountPaid)
+
+    const packageName =
+      packageData.name ||
+      'iTrainSpeed Training'
+
+    const paymentType =
+      getPaymentTypeLabel(
+        packageData
+      )
+
+    const purchaseTime =
+      formatPurchaseDate(
+        session.created
+          ? Number(
+              session.created
+            ) * 1000
+          : new Date()
+      )
+
+    const safeGuardianName =
+      escapeHtml(guardianName)
+
+    const safeGuardianEmail =
+      escapeHtml(guardianEmail)
+
+    const safeAthleteName =
+      escapeHtml(athleteName)
+
+    const safePackageName =
+      escapeHtml(packageName)
+
+    const safePaymentType =
+      escapeHtml(paymentType)
+
+    const safeAmount =
+      escapeHtml(amount)
+
+    const safePurchaseTime =
+      escapeHtml(purchaseTime)
+
+    const transporter =
+      nodemailer.createTransport({
+        host: smtpHost,
+        port: 465,
+        secure: true,
+
+        auth: {
+          user: smtpUser,
+          pass: smtpPass,
+        },
+      })
+
+    const subject =
+      `💰 New iTrainSpeed Purchase — ${amount}`
+
+    const html = `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <meta charset="UTF-8" />
+          <meta
+            name="viewport"
+            content="width=device-width, initial-scale=1.0"
+          />
+        </head>
+
+        <body
+          style="
+            margin: 0;
+            padding: 0;
+            background-color: #f4f4f4;
+            font-family: Arial, Helvetica, sans-serif;
+            color: #111111;
+          "
+        >
+          <table
+            role="presentation"
+            width="100%"
+            cellspacing="0"
+            cellpadding="0"
+            border="0"
+            style="
+              width: 100%;
+              background-color: #f4f4f4;
+              padding: 30px 15px;
+            "
+          >
+            <tr>
+              <td align="center">
+
+                <table
+                  role="presentation"
+                  width="100%"
+                  cellspacing="0"
+                  cellpadding="0"
+                  border="0"
+                  style="
+                    max-width: 600px;
+                    background-color: #ffffff;
+                    border-radius: 14px;
+                    overflow: hidden;
+                  "
+                >
+
+                  <tr>
+                    <td
+                      style="
+                        background-color: #000000;
+                        padding: 28px 30px;
+                        text-align: center;
+                      "
+                    >
+                      <div
+                        style="
+                          color: #ffffff;
+                          font-size: 28px;
+                          font-weight: 800;
+                          letter-spacing: -1px;
+                        "
+                      >
+                        <span
+                          style="
+                            color: #e10600;
+                          "
+                        >
+                          i
+                        </span>TrainSpeed
+                      </div>
+
+                      <div
+                        style="
+                          margin-top: 7px;
+                          color: #bdbdbd;
+                          font-size: 11px;
+                          font-weight: 700;
+                          letter-spacing: 2px;
+                        "
+                      >
+                        TRAIN. TRACK. DEVELOP.
+                      </div>
+                    </td>
+                  </tr>
+
+                  <tr>
+                    <td
+                      style="
+                        padding: 34px 32px;
+                      "
+                    >
+
+                      <div
+                        style="
+                          font-size: 12px;
+                          font-weight: 800;
+                          color: #e10600;
+                          text-transform: uppercase;
+                          letter-spacing: 1.5px;
+                          margin-bottom: 10px;
+                        "
+                      >
+                        New Purchase
+                      </div>
+
+                      <h1
+                        style="
+                          margin: 0 0 8px 0;
+                          font-size: 32px;
+                          line-height: 1.2;
+                          color: #111111;
+                        "
+                      >
+                        ${safeAmount}
+                      </h1>
+
+                      <p
+                        style="
+                          margin: 0 0 28px 0;
+                          color: #666666;
+                          font-size: 15px;
+                          line-height: 1.6;
+                        "
+                      >
+                        A successful iTrainSpeed purchase has been completed.
+                      </p>
+
+                      <table
+                        role="presentation"
+                        width="100%"
+                        cellspacing="0"
+                        cellpadding="0"
+                        border="0"
+                        style="
+                          width: 100%;
+                          border: 1px solid #e5e5e5;
+                          border-radius: 10px;
+                          margin-bottom: 20px;
+                        "
+                      >
+
+                        <tr>
+                          <td
+                            colspan="2"
+                            style="
+                              padding: 15px 18px;
+                              background-color: #f8f8f8;
+                              font-size: 13px;
+                              font-weight: 800;
+                              text-transform: uppercase;
+                              letter-spacing: 1px;
+                            "
+                          >
+                            Purchase
+                          </td>
+                        </tr>
+
+                        <tr>
+                          <td
+                            style="
+                              padding: 14px 18px;
+                              border-top: 1px solid #eeeeee;
+                              color: #777777;
+                              font-size: 14px;
+                            "
+                          >
+                            Training
+                          </td>
+
+                          <td
+                            align="right"
+                            style="
+                              padding: 14px 18px;
+                              border-top: 1px solid #eeeeee;
+                              font-size: 14px;
+                              font-weight: 700;
+                            "
+                          >
+                            ${safePackageName}
+                          </td>
+                        </tr>
+
+                        <tr>
+                          <td
+                            style="
+                              padding: 14px 18px;
+                              border-top: 1px solid #eeeeee;
+                              color: #777777;
+                              font-size: 14px;
+                            "
+                          >
+                            Amount
+                          </td>
+
+                          <td
+                            align="right"
+                            style="
+                              padding: 14px 18px;
+                              border-top: 1px solid #eeeeee;
+                              font-size: 14px;
+                              font-weight: 700;
+                            "
+                          >
+                            ${safeAmount}
+                          </td>
+                        </tr>
+
+                        <tr>
+                          <td
+                            style="
+                              padding: 14px 18px;
+                              border-top: 1px solid #eeeeee;
+                              color: #777777;
+                              font-size: 14px;
+                            "
+                          >
+                            Type
+                          </td>
+
+                          <td
+                            align="right"
+                            style="
+                              padding: 14px 18px;
+                              border-top: 1px solid #eeeeee;
+                              font-size: 14px;
+                              font-weight: 700;
+                            "
+                          >
+                            ${safePaymentType}
+                          </td>
+                        </tr>
+
+                        <tr>
+                          <td
+                            style="
+                              padding: 14px 18px;
+                              border-top: 1px solid #eeeeee;
+                              color: #777777;
+                              font-size: 14px;
+                            "
+                          >
+                            Status
+                          </td>
+
+                          <td
+                            align="right"
+                            style="
+                              padding: 14px 18px;
+                              border-top: 1px solid #eeeeee;
+                              font-size: 14px;
+                              font-weight: 700;
+                            "
+                          >
+                            Paid
+                          </td>
+                        </tr>
+
+                      </table>
+
+                      <table
+                        role="presentation"
+                        width="100%"
+                        cellspacing="0"
+                        cellpadding="0"
+                        border="0"
+                        style="
+                          width: 100%;
+                          border: 1px solid #e5e5e5;
+                          border-radius: 10px;
+                          margin-bottom: 20px;
+                        "
+                      >
+
+                        <tr>
+                          <td
+                            colspan="2"
+                            style="
+                              padding: 15px 18px;
+                              background-color: #f8f8f8;
+                              font-size: 13px;
+                              font-weight: 800;
+                              text-transform: uppercase;
+                              letter-spacing: 1px;
+                            "
+                          >
+                            Customer
+                          </td>
+                        </tr>
+
+                        <tr>
+                          <td
+                            style="
+                              padding: 14px 18px;
+                              border-top: 1px solid #eeeeee;
+                              color: #777777;
+                              font-size: 14px;
+                            "
+                          >
+                            Parent
+                          </td>
+
+                          <td
+                            align="right"
+                            style="
+                              padding: 14px 18px;
+                              border-top: 1px solid #eeeeee;
+                              font-size: 14px;
+                              font-weight: 700;
+                            "
+                          >
+                            ${safeGuardianName}
+                          </td>
+                        </tr>
+
+                        <tr>
+                          <td
+                            style="
+                              padding: 14px 18px;
+                              border-top: 1px solid #eeeeee;
+                              color: #777777;
+                              font-size: 14px;
+                            "
+                          >
+                            Email
+                          </td>
+
+                          <td
+                            align="right"
+                            style="
+                              padding: 14px 18px;
+                              border-top: 1px solid #eeeeee;
+                              font-size: 14px;
+                              font-weight: 700;
+                            "
+                          >
+                            ${safeGuardianEmail}
+                          </td>
+                        </tr>
+
+                        <tr>
+                          <td
+                            style="
+                              padding: 14px 18px;
+                              border-top: 1px solid #eeeeee;
+                              color: #777777;
+                              font-size: 14px;
+                            "
+                          >
+                            Athlete
+                          </td>
+
+                          <td
+                            align="right"
+                            style="
+                              padding: 14px 18px;
+                              border-top: 1px solid #eeeeee;
+                              font-size: 14px;
+                              font-weight: 700;
+                            "
+                          >
+                            ${safeAthleteName}
+                          </td>
+                        </tr>
+
+                      </table>
+
+                      <div
+                        style="
+                          background-color: #111111;
+                          color: #ffffff;
+                          padding: 18px;
+                          border-radius: 10px;
+                        "
+                      >
+                        <div
+                          style="
+                            color: #999999;
+                            font-size: 11px;
+                            font-weight: 800;
+                            text-transform: uppercase;
+                            letter-spacing: 1px;
+                            margin-bottom: 6px;
+                          "
+                        >
+                          Purchased
+                        </div>
+
+                        <div
+                          style="
+                            font-size: 15px;
+                            font-weight: 700;
+                          "
+                        >
+                          ${safePurchaseTime}
+                        </div>
+                      </div>
+
+                    </td>
+                  </tr>
+
+                  <tr>
+                    <td
+                      style="
+                        padding: 22px 30px;
+                        background-color: #f8f8f8;
+                        text-align: center;
+                        color: #888888;
+                        font-size: 12px;
+                        line-height: 1.6;
+                      "
+                    >
+                      iTrainSpeed Owner Notification
+                      <br />
+                      TRAIN. TRACK. DEVELOP.
+                    </td>
+                  </tr>
+
+                </table>
+
+              </td>
+            </tr>
+          </table>
+        </body>
+      </html>
+    `
+
+    const text = `
+NEW iTRAINSPEED PURCHASE
+
+Amount: ${amount}
+Training: ${packageName}
+Type: ${paymentType}
+Status: Paid
+
+CUSTOMER
+Parent: ${guardianName}
+Email: ${guardianEmail}
+Athlete: ${athleteName}
+
+Purchased:
+${purchaseTime}
+
+iTrainSpeed
+TRAIN. TRACK. DEVELOP.
+    `.trim()
+
+    await transporter.sendMail({
+      from:
+        `"iTrainSpeed" <${smtpUser}>`,
+
+      to: ownerEmail,
+
+      replyTo:
+        guardianEmail !==
+        'Not available'
+          ? guardianEmail
+          : smtpUser,
+
+      subject,
+      text,
+      html,
+    })
+
+    console.log(
+      'Purchase notification sent.',
+      {
+        checkoutSessionId:
+          session.id,
+
+        guardianId,
+
+        athleteId,
+
+        packageId:
+          packageData.id,
+
+        amountPaid,
+      }
+    )
+  } catch (error) {
+    /*
+     * Deliberately do not throw.
+     *
+     * A notification problem should NEVER cause
+     * Stripe to retry an otherwise successful
+     * purchase fulfillment.
+     */
+    console.error(
+      'Purchase notification failed:',
+      error
+    )
+  }
 }
 
 /*
@@ -517,6 +1263,7 @@ async function fulfillCheckout(
           rejected: true,
           reason:
             'PROMO_SOLD_OUT',
+          packageData,
         }
       }
 
@@ -553,6 +1300,7 @@ async function fulfillCheckout(
           rejected: true,
           reason:
             'ATHLETE_ALREADY_ENROLLED',
+          packageData,
         }
       }
 
@@ -624,6 +1372,7 @@ async function fulfillCheckout(
 
   return {
     rejected: false,
+    packageData,
   }
 }
 
@@ -686,14 +1435,6 @@ async function handleChargeRefunded(
     throw purchaseError
   }
 
-  /*
-   * A charge.refunded event can also be generated for
-   * a payment that was intentionally rejected before
-   * an iTrainSpeed purchase record was created, such as
-   * limited-membership race protection.
-   *
-   * That is not a webhook failure.
-   */
   if (!purchase) {
     console.warn(
       'Stripe refund received with no matching iTrainSpeed purchase.',
@@ -739,15 +1480,6 @@ async function handleChargeRefunded(
     refunded_at:
       new Date().toISOString(),
   }
-
-  /*
-   * Keep the original payment status/history intact.
-   * `status = paid` means the Checkout payment was
-   * originally completed successfully.
-   *
-   * refund_status separately records what happened
-   * afterward.
-   */
 
   const { error: updateError } =
     await admin
@@ -1133,24 +1865,40 @@ export async function POST(
     }
 
     switch (event.type) {
-      case 'checkout.session.completed':
-        await fulfillCheckout(
-          admin,
-          stripe,
+      case 'checkout.session.completed': {
+        const session =
           event.data.object
-        )
+
+        const result =
+          await fulfillCheckout(
+            admin,
+            stripe,
+            session
+          )
+
+        /*
+         * Send the owner notification ONLY when
+         * fulfillment was accepted.
+         *
+         * Rejected limited memberships are cancelled
+         * and refunded and must not generate a false
+         * "new purchase" notification.
+         */
+        if (
+          !result?.rejected &&
+          result?.packageData
+        ) {
+          await sendPurchaseNotification(
+            admin,
+            session,
+            result.packageData
+          )
+        }
+
         break
+      }
 
       case 'charge.refunded':
-        /*
-         * Record full and partial refunds against
-         * the original iTrainSpeed purchase.
-         *
-         * Entitlement revocation is deliberately
-         * handled separately until purchases and
-         * entitlements have an explicit relational
-         * link.
-         */
         await handleChargeRefunded(
           admin,
           event.data.object
