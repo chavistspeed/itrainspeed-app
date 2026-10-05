@@ -186,51 +186,114 @@ export default function Dashboard() {
     )
   }
 
-  async function cancel(
-    booking
+async function cancel(
+  booking
+) {
+  const startAt =
+    booking.sessions?.start_at
+
+  if (
+    !canCancelBooking(
+      startAt
+    )
   ) {
-    const startAt =
-      booking.sessions?.start_at
-
-    if (
-      !canCancelBooking(
-        startAt
-      )
-    ) {
-      setMsg(
-        'The cancellation window for this session has closed. Training sessions must be cancelled at least 6 hours before the scheduled start time.'
-      )
-
-      return
-    }
-
-    if (
-      !confirm(
-        'Cancel this booking? Your training credit will be returned to your account.'
-      )
-    ) {
-      return
-    }
-
-    const { error } =
-      await supabase().rpc(
-        'cancel_booking_v14',
-        {
-          p_booking_id:
-            booking.id,
-        }
-      )
-
     setMsg(
-      error
-        ? error.message
-        : 'Booking cancelled. Your session has been returned to your training access.'
+      'The cancellation window for this session has closed. Training sessions must be cancelled at least 6 hours before the scheduled start time.'
     )
 
-    if (!error) {
-      await load()
-    }
+    return
   }
+
+  if (
+    !confirm(
+      'Cancel this booking? Your training credit will be returned to your account.'
+    )
+  ) {
+    return
+  }
+
+  const s = supabase()
+
+  const { error } =
+    await s.rpc(
+      'cancel_booking_v14',
+      {
+        p_booking_id:
+          booking.id,
+      }
+    )
+
+  if (error) {
+    setMsg(
+      error.message
+    )
+    return
+  }
+
+  /*
+   * The database cancellation has succeeded.
+   * The credit has already been restored by
+   * cancel_booking_v14.
+   *
+   * Email failure must never make the customer
+   * think the cancellation itself failed.
+   */
+  try {
+    const {
+      data: { session },
+    } = await s.auth.getSession()
+
+    if (
+      session?.access_token
+    ) {
+      const response =
+        await fetch(
+          '/api/notifications/cancel-booking',
+          {
+            method: 'POST',
+
+            headers: {
+              'Content-Type':
+                'application/json',
+
+              Authorization:
+                `Bearer ${session.access_token}`,
+            },
+
+            body:
+              JSON.stringify({
+                booking_id:
+                  booking.id,
+              }),
+          }
+        )
+
+      if (!response.ok) {
+        const result =
+          await response
+            .json()
+            .catch(() => null)
+
+        console.error(
+          'Cancellation notification failed:',
+          result?.error ||
+            response.statusText
+        )
+      }
+    }
+  } catch (notificationError) {
+    console.error(
+      'Cancellation notification error:',
+      notificationError
+    )
+  }
+
+  setMsg(
+    'Booking cancelled. Your session has been returned to your training access.'
+  )
+
+  await load()
+}
 
   async function out() {
     await supabase()
