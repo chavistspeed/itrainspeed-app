@@ -59,6 +59,28 @@ function money(cents) {
   })
 }
 
+function formatDate(value) {
+  if (!value) return '—'
+
+  return new Date(value).toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  })
+}
+
+function formatDateTime(value) {
+  if (!value) return '—'
+
+  return new Date(value).toLocaleString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  })
+}
+
 export default function Coach() {
   const [role, setRole] = useState('')
 
@@ -66,10 +88,10 @@ export default function Coach() {
   const [sessions, setSessions] = useState([])
   const [packages, setPackages] = useState([])
 
-  // Athlete directory
   const [athletes, setAthletes] = useState([])
   const [athleteSearch, setAthleteSearch] = useState('')
   const [athleteMsg, setAthleteMsg] = useState('')
+  const [expandedAthlete, setExpandedAthlete] = useState(null)
 
   const [selected, setSelected] = useState(null)
   const [roster, setRoster] = useState([])
@@ -143,7 +165,7 @@ export default function Coach() {
         })
         .order('name'),
 
-      s.rpc('get_coach_athletes_v1'),
+      s.rpc('get_coach_athletes_v2'),
     ])
 
     setRole(profile?.role || 'parent')
@@ -301,6 +323,46 @@ export default function Coach() {
   }
 
   /* =====================================================
+     ATHLETES
+     ===================================================== */
+
+  const filteredAthletes =
+    athletes.filter((athlete) => {
+      const query =
+        athleteSearch
+          .trim()
+          .toLowerCase()
+
+      if (!query) return true
+
+      const searchable = [
+        athlete.first_name,
+        athlete.last_name,
+        athlete.sport,
+        athlete.age,
+        athlete.guardian_name,
+        athlete.guardian_email,
+      ]
+        .filter(
+          (value) =>
+            value !== null &&
+            value !== undefined
+        )
+        .join(' ')
+        .toLowerCase()
+
+      return searchable.includes(query)
+    })
+
+  function toggleAthlete(athleteId) {
+    setExpandedAthlete(
+      expandedAthlete === athleteId
+        ? null
+        : athleteId
+    )
+  }
+
+  /* =====================================================
      PROGRAMS
      ===================================================== */
 
@@ -335,9 +397,7 @@ export default function Coach() {
         program.price_cents ?? 0,
 
       price_dollars: (
-        Number(
-          program.price_cents ?? 0
-        ) / 100
+        Number(program.price_cents ?? 0) / 100
       ).toFixed(2),
 
       active:
@@ -422,25 +482,16 @@ export default function Coach() {
 
     const payload = {
       name: pf.name.trim(),
-
       category: pf.category,
-
       min_age: minAge,
       max_age: maxAge,
-
       credit_cost: creditCost,
-
-      credit_type:
-        pf.service_type,
-
-      service_type:
-        pf.service_type,
-
+      credit_type: pf.service_type,
+      service_type: pf.service_type,
       price_cents:
         Math.round(
           priceDollars * 100
         ),
-
       active:
         Boolean(pf.active),
     }
@@ -509,30 +560,22 @@ export default function Coach() {
 
     setPackageForm({
       name: item.name || '',
-
       description:
         item.description || '',
-
       access_type:
         item.access_type ||
         'credits',
-
       credit_type:
         item.credit_type ||
         'group',
-
       credits:
         item.credits ?? '',
-
       duration_days:
         item.duration_days ?? '',
-
       purchase_limit:
         item.purchase_limit ?? '',
-
       active:
         item.active !== false,
-
       sort_order:
         item.sort_order ?? 0,
     })
@@ -551,9 +594,7 @@ export default function Coach() {
     setPackageForm(
       (current) => ({
         ...current,
-
         access_type: type,
-
         credits:
           type === 'credits'
             ? current.credits || 1
@@ -656,11 +697,7 @@ export default function Coach() {
         packageForm.sort_order
       )
 
-    if (
-      !Number.isFinite(
-        sortOrder
-      )
-    ) {
+    if (!Number.isFinite(sortOrder)) {
       setPackageMsg(
         'Please enter a valid display order.'
       )
@@ -695,9 +732,7 @@ export default function Coach() {
         ),
 
       sort_order:
-        Math.round(
-          sortOrder
-        ),
+        Math.round(sortOrder),
     }
 
     const { error } =
@@ -758,42 +793,6 @@ export default function Coach() {
       await load()
     }
   }
-
-  /* =====================================================
-     ATHLETE SEARCH
-     ===================================================== */
-
-  const filteredAthletes =
-    athletes.filter(
-      (athlete) => {
-        const query =
-          athleteSearch
-            .trim()
-            .toLowerCase()
-
-        if (!query) {
-          return true
-        }
-
-        const searchable = [
-          athlete.first_name,
-          athlete.last_name,
-          athlete.sport,
-          athlete.age,
-        ]
-          .filter(
-            (value) =>
-              value !== null &&
-              value !== undefined
-          )
-          .join(' ')
-          .toLowerCase()
-
-        return searchable.includes(
-          query
-        )
-      }
-    )
 
   /* =====================================================
      ACCESS CONTROL
@@ -877,7 +876,7 @@ export default function Coach() {
       </div>
 
       {/* ===============================================
-          SCHEDULE TAB
+          SCHEDULE
           =============================================== */}
 
       {tab === 'schedule' && (
@@ -888,39 +887,28 @@ export default function Coach() {
                 Publish sessions
               </h2>
 
-              <form
-                onSubmit={create}
-              >
+              <form onSubmit={create}>
                 <label>
                   Program
 
                   <select
-                    value={
-                      f.program_id
-                    }
-                    onChange={(
-                      e
-                    ) =>
+                    value={f.program_id}
+                    onChange={(e) =>
                       setF({
                         ...f,
                         program_id:
-                          e.target
-                            .value,
+                          e.target.value,
                       })
                     }
                     required
                   >
                     {programs
                       .filter(
-                        (
-                          program
-                        ) =>
+                        (program) =>
                           program.active
                       )
                       .map(
-                        (
-                          program
-                        ) => (
+                        (program) => (
                           <option
                             key={
                               program.id
@@ -948,17 +936,12 @@ export default function Coach() {
 
                   <input
                     type="datetime-local"
-                    value={
-                      f.start_at
-                    }
-                    onChange={(
-                      e
-                    ) =>
+                    value={f.start_at}
+                    onChange={(e) =>
                       setF({
                         ...f,
                         start_at:
-                          e.target
-                            .value,
+                          e.target.value,
                       })
                     }
                     required
@@ -972,17 +955,12 @@ export default function Coach() {
                     <input
                       type="number"
                       min="1"
-                      value={
-                        f.capacity
-                      }
-                      onChange={(
-                        e
-                      ) =>
+                      value={f.capacity}
+                      onChange={(e) =>
                         setF({
                           ...f,
                           capacity:
-                            e.target
-                              .value,
+                            e.target.value,
                         })
                       }
                       required
@@ -999,14 +977,11 @@ export default function Coach() {
                       value={
                         f.duration_minutes
                       }
-                      onChange={(
-                        e
-                      ) =>
+                      onChange={(e) =>
                         setF({
                           ...f,
                           duration_minutes:
-                            e.target
-                              .value,
+                            e.target.value,
                         })
                       }
                       required
@@ -1018,17 +993,12 @@ export default function Coach() {
                   Location
 
                   <input
-                    value={
-                      f.location
-                    }
-                    onChange={(
-                      e
-                    ) =>
+                    value={f.location}
+                    onChange={(e) =>
                       setF({
                         ...f,
                         location:
-                          e.target
-                            .value,
+                          e.target.value,
                       })
                     }
                     required
@@ -1042,14 +1012,11 @@ export default function Coach() {
                     value={
                       f.repeat_weeks
                     }
-                    onChange={(
-                      e
-                    ) =>
+                    onChange={(e) =>
                       setF({
                         ...f,
                         repeat_weeks:
-                          e.target
-                            .value,
+                          e.target.value,
                       })
                     }
                   >
@@ -1061,24 +1028,20 @@ export default function Coach() {
                       8,
                       10,
                       12,
-                    ].map(
-                      (n) => (
-                        <option
-                          key={n}
-                          value={n}
-                        >
-                          {n === 1
-                            ? 'No repeat'
-                            : `${n} weeks`}
-                        </option>
-                      )
-                    )}
+                    ].map((n) => (
+                      <option
+                        key={n}
+                        value={n}
+                      >
+                        {n === 1
+                          ? 'No repeat'
+                          : `${n} weeks`}
+                      </option>
+                    ))}
                   </select>
                 </label>
 
-                <button
-                  type="submit"
-                >
+                <button type="submit">
                   Publish{' '}
                   {Number(
                     f.repeat_weeks
@@ -1157,8 +1120,7 @@ export default function Coach() {
                             )
                           }
                         >
-                          Cancel
-                          session
+                          Cancel session
                         </button>
                       </div>
                     </div>
@@ -1202,9 +1164,7 @@ export default function Coach() {
                   type="button"
                   className="secondary smallBtn"
                   onClick={() =>
-                    setSelected(
-                      null
-                    )
+                    setSelected(null)
                   }
                 >
                   Close
@@ -1213,19 +1173,14 @@ export default function Coach() {
 
               {rosterMsg && (
                 <div className="notice">
-                  {
-                    rosterMsg
-                  }
+                  {rosterMsg}
                 </div>
               )}
 
               {!rosterMsg &&
                 (roster.length ? (
                   roster.map(
-                    (
-                      item,
-                      i
-                    ) => (
+                    (item, i) => (
                       <div
                         className="rosterRow"
                         key={
@@ -1233,8 +1188,7 @@ export default function Coach() {
                         }
                       >
                         <b>
-                          {i + 1}
-                          .{' '}
+                          {i + 1}.{' '}
                           {
                             item.athlete_name
                           }
@@ -1264,32 +1218,28 @@ export default function Coach() {
       )}
 
       {/* ===============================================
-          ATHLETES TAB
+          ATHLETES
           =============================================== */}
 
       {tab === 'athletes' && (
         <section>
           <div className="card">
-            <div className="row">
-              <div>
-                <small>
-                  ATHLETE DIRECTORY
-                </small>
+            <small>
+              ATHLETE DIRECTORY
+            </small>
 
-                <h2>
-                  Registered Athletes
-                </h2>
+            <h2>
+              Registered Athletes
+            </h2>
 
-                <span>
-                  {athletes.length}{' '}
-                  athlete
-                  {athletes.length === 1
-                    ? ''
-                    : 's'}{' '}
-                  registered
-                </span>
-              </div>
-            </div>
+            <span>
+              {athletes.length}{' '}
+              athlete
+              {athletes.length === 1
+                ? ''
+                : 's'}{' '}
+              registered
+            </span>
 
             <label
               style={{
@@ -1300,10 +1250,8 @@ export default function Coach() {
 
               <input
                 type="search"
-                placeholder="Search by athlete name, age, or sport..."
-                value={
-                  athleteSearch
-                }
+                placeholder="Search athlete, parent, email, age, or sport..."
+                value={athleteSearch}
                 onChange={(e) =>
                   setAthleteSearch(
                     e.target.value
@@ -1326,66 +1274,256 @@ export default function Coach() {
           >
             {!athleteMsg &&
               filteredAthletes.map(
-                (athlete) => (
-                  <div
-                    className="card compact"
-                    key={
-                      athlete.athlete_id
-                    }
-                  >
-                    <div className="programTop">
-                      <b>
-                        {
-                          athlete.first_name
-                        }{' '}
-                        {
-                          athlete.last_name
-                        }
-                      </b>
+                (athlete) => {
+                  const isOpen =
+                    expandedAthlete ===
+                    athlete.athlete_id
 
-                      <span className="status activeStatus">
-                        Athlete
-                      </span>
-                    </div>
-
-                    <span>
-                      {athlete.age !==
-                        null &&
-                      athlete.age !==
-                        undefined
-                        ? `Age ${athlete.age}`
-                        : 'Age not provided'}
-
-                      {athlete.sport
-                        ? ` • ${athlete.sport}`
-                        : ''}
-                    </span>
-
-                    <span>
-                      Added{' '}
-                      {athlete.created_at
-                        ? new Date(
-                            athlete.created_at
-                          ).toLocaleDateString(
-                            'en-US',
+                  return (
+                    <div
+                      className="card"
+                      key={
+                        athlete.athlete_id
+                      }
+                      style={{
+                        marginBottom:
+                          '14px',
+                      }}
+                    >
+                      <div className="programTop">
+                        <div>
+                          <b
+                            style={{
+                              fontSize:
+                                '17px',
+                            }}
+                          >
                             {
-                              month:
-                                'short',
-                              day:
-                                'numeric',
-                              year:
-                                'numeric',
+                              athlete.first_name
+                            }{' '}
+                            {
+                              athlete.last_name
                             }
-                          )
-                        : '—'}
-                    </span>
-                  </div>
-                )
+                          </b>
+
+                          <span>
+                            {athlete.age !==
+                              null &&
+                            athlete.age !==
+                              undefined
+                              ? `Age ${athlete.age}`
+                              : 'Age not provided'}
+
+                            {athlete.sport
+                              ? ` • ${athlete.sport}`
+                              : ''}
+                          </span>
+
+                          <span>
+                            Added{' '}
+                            {formatDate(
+                              athlete.athlete_created_at
+                            )}
+                          </span>
+                        </div>
+
+                        <span className="status activeStatus">
+                          Athlete
+                        </span>
+                      </div>
+
+                      <div
+                        className="inlineActions"
+                        style={{
+                          marginTop:
+                            '14px',
+                        }}
+                      >
+                        <button
+                          type="button"
+                          className="linkBtn"
+                          onClick={() =>
+                            toggleAthlete(
+                              athlete.athlete_id
+                            )
+                          }
+                        >
+                          {isOpen
+                            ? 'Hide details ↑'
+                            : 'View athlete →'}
+                        </button>
+                      </div>
+
+                      {isOpen && (
+                        <div
+                          style={{
+                            marginTop:
+                              '20px',
+                            paddingTop:
+                              '20px',
+                            borderTop:
+                              '1px solid #e5e7eb',
+                          }}
+                        >
+                          <div className="grid2">
+                            <div>
+                              <small>
+                                PARENT /
+                                GUARDIAN
+                              </small>
+
+                              <h3>
+                                {athlete.guardian_name ||
+                                  'Name not provided'}
+                              </h3>
+
+                              <span>
+                                {athlete.guardian_email ||
+                                  'Email unavailable'}
+                              </span>
+
+                              <span>
+                                Account
+                                created{' '}
+                                {formatDate(
+                                  athlete.guardian_created_at
+                                )}
+                              </span>
+                            </div>
+
+                            <div>
+                              <small>
+                                WAIVER
+                              </small>
+
+                              <h3>
+                                {athlete.waiver_signed
+                                  ? '✓ Signed'
+                                  : 'Not signed'}
+                              </h3>
+
+                              {athlete.waiver_signed && (
+                                <span>
+                                  Accepted{' '}
+                                  {formatDate(
+                                    athlete.waiver_accepted_at
+                                  )}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+
+                          <div
+                            className="grid2"
+                            style={{
+                              marginTop:
+                                '24px',
+                            }}
+                          >
+                            <div>
+                              <small>
+                                TRAINING
+                                ACCESS
+                              </small>
+
+                              <h3>
+                                {athlete.has_unlimited_access
+                                  ? 'Unlimited Access'
+                                  : `${Number(
+                                      athlete.credits_remaining ||
+                                        0
+                                    )} Credits`}
+                              </h3>
+
+                              <span>
+                                {Number(
+                                  athlete.entitlement_count ||
+                                    0
+                                )}{' '}
+                                active access
+                                record
+                                {Number(
+                                  athlete.entitlement_count ||
+                                    0
+                                ) === 1
+                                  ? ''
+                                  : 's'}
+                              </span>
+
+                              {Number(
+                                athlete.guardian_credits ||
+                                  0
+                              ) > 0 && (
+                                <span>
+                                  Family
+                                  balance:{' '}
+                                  {
+                                    athlete.guardian_credits
+                                  }{' '}
+                                  credits
+                                </span>
+                              )}
+                            </div>
+
+                            <div>
+                              <small>
+                                BOOKING
+                                ACTIVITY
+                              </small>
+
+                              <h3>
+                                {Number(
+                                  athlete.active_bookings ||
+                                    0
+                                )}{' '}
+                                Active
+                              </h3>
+
+                              <span>
+                                {Number(
+                                  athlete.total_bookings ||
+                                    0
+                                )}{' '}
+                                total •{' '}
+                                {Number(
+                                  athlete.cancelled_bookings ||
+                                    0
+                                )}{' '}
+                                cancelled
+                              </span>
+
+                              <span>
+                                Last booking:{' '}
+                                {athlete.last_booking_at
+                                  ? formatDateTime(
+                                      athlete.last_booking_at
+                                    )
+                                  : 'None yet'}
+                              </span>
+                            </div>
+                          </div>
+
+                          <div
+                            className="notice"
+                            style={{
+                              marginTop:
+                                '24px',
+                            }}
+                          >
+                            Athlete ID:{' '}
+                            {
+                              athlete.athlete_id
+                            }
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )
+                }
               )}
 
             {!athleteMsg &&
-              athletes.length ===
-                0 && (
+              athletes.length === 0 && (
                 <div className="empty">
                   No registered
                   athletes found.
@@ -1393,8 +1531,7 @@ export default function Coach() {
               )}
 
             {!athleteMsg &&
-              athletes.length >
-                0 &&
+              athletes.length > 0 &&
               filteredAthletes.length ===
                 0 && (
                 <div className="empty">
@@ -1407,7 +1544,7 @@ export default function Coach() {
       )}
 
       {/* ===============================================
-          PROGRAMS TAB
+          PROGRAMS
           =============================================== */}
 
       {tab === 'programs' && (
@@ -1419,24 +1556,17 @@ export default function Coach() {
                 : 'Add program'}
             </h2>
 
-            <form
-              onSubmit={
-                saveProgram
-              }
-            >
+            <form onSubmit={saveProgram}>
               <label>
                 Program name
 
                 <input
                   value={pf.name}
-                  onChange={(
-                    e
-                  ) =>
+                  onChange={(e) =>
                     setPf({
                       ...pf,
                       name:
-                        e.target
-                          .value,
+                        e.target.value,
                     })
                   }
                   required
@@ -1447,17 +1577,12 @@ export default function Coach() {
                 Category
 
                 <select
-                  value={
-                    pf.category
-                  }
-                  onChange={(
-                    e
-                  ) =>
+                  value={pf.category}
+                  onChange={(e) =>
                     setPf({
                       ...pf,
                       category:
-                        e.target
-                          .value,
+                        e.target.value,
                     })
                   }
                 >
@@ -1467,9 +1592,7 @@ export default function Coach() {
                     'Private Training',
                     'Recovery',
                   ].map(
-                    (
-                      category
-                    ) => (
+                    (category) => (
                       <option
                         key={
                           category
@@ -1478,9 +1601,7 @@ export default function Coach() {
                           category
                         }
                       >
-                        {
-                          category
-                        }
+                        {category}
                       </option>
                     )
                   )}
@@ -1494,12 +1615,9 @@ export default function Coach() {
                   value={
                     pf.service_type
                   }
-                  onChange={(
-                    e
-                  ) =>
+                  onChange={(e) =>
                     updateServiceType(
-                      e.target
-                        .value
+                      e.target.value
                     )
                   }
                   required
@@ -1510,12 +1628,8 @@ export default function Coach() {
                       text,
                     ]) => (
                       <option
-                        key={
-                          value
-                        }
-                        value={
-                          value
-                        }
+                        key={value}
+                        value={value}
                       >
                         {text}
                       </option>
@@ -1543,14 +1657,11 @@ export default function Coach() {
                     value={
                       pf.min_age
                     }
-                    onChange={(
-                      e
-                    ) =>
+                    onChange={(e) =>
                       setPf({
                         ...pf,
                         min_age:
-                          e.target
-                            .value,
+                          e.target.value,
                       })
                     }
                     required
@@ -1566,14 +1677,11 @@ export default function Coach() {
                     value={
                       pf.max_age
                     }
-                    onChange={(
-                      e
-                    ) =>
+                    onChange={(e) =>
                       setPf({
                         ...pf,
                         max_age:
-                          e.target
-                            .value,
+                          e.target.value,
                       })
                     }
                     required
@@ -1583,8 +1691,7 @@ export default function Coach() {
 
               <div className="form2">
                 <label>
-                  Credits per
-                  booking
+                  Credits per booking
 
                   <input
                     type="number"
@@ -1593,14 +1700,11 @@ export default function Coach() {
                     value={
                       pf.credit_cost
                     }
-                    onChange={(
-                      e
-                    ) =>
+                    onChange={(e) =>
                       setPf({
                         ...pf,
                         credit_cost:
-                          e.target
-                            .value,
+                          e.target.value,
                       })
                     }
                     required
@@ -1608,8 +1712,7 @@ export default function Coach() {
                 </label>
 
                 <label>
-                  Single-session
-                  price ($)
+                  Single-session price ($)
 
                   <input
                     type="number"
@@ -1618,14 +1721,11 @@ export default function Coach() {
                     value={
                       pf.price_dollars
                     }
-                    onChange={(
-                      e
-                    ) =>
+                    onChange={(e) =>
                       setPf({
                         ...pf,
                         price_dollars:
-                          e.target
-                            .value,
+                          e.target.value,
                       })
                     }
                     required
@@ -1636,17 +1736,12 @@ export default function Coach() {
               <label className="check">
                 <input
                   type="checkbox"
-                  checked={
-                    pf.active
-                  }
-                  onChange={(
-                    e
-                  ) =>
+                  checked={pf.active}
+                  onChange={(e) =>
                     setPf({
                       ...pf,
                       active:
-                        e.target
-                          .checked,
+                        e.target.checked,
                     })
                   }
                 />
@@ -1655,9 +1750,7 @@ export default function Coach() {
               </label>
 
               <div className="inlineActions">
-                <button
-                  type="submit"
-                >
+                <button type="submit">
                   {editing
                     ? 'Save changes'
                     : 'Create program'}
@@ -1751,8 +1844,7 @@ export default function Coach() {
                         {money(
                           program.price_cents
                         )}{' '}
-                        single
-                        session
+                        single session
                       </span>
                     </div>
 
@@ -1797,7 +1889,7 @@ export default function Coach() {
       )}
 
       {/* ===============================================
-          PACKAGES TAB
+          PACKAGES
           =============================================== */}
 
       {tab === 'packages' && (
@@ -1841,14 +1933,11 @@ export default function Coach() {
                     value={
                       packageForm.name
                     }
-                    onChange={(
-                      e
-                    ) =>
+                    onChange={(e) =>
                       setPackageForm({
                         ...packageForm,
                         name:
-                          e.target
-                            .value,
+                          e.target.value,
                       })
                     }
                     required
@@ -1862,14 +1951,11 @@ export default function Coach() {
                     value={
                       packageForm.description
                     }
-                    onChange={(
-                      e
-                    ) =>
+                    onChange={(e) =>
                       setPackageForm({
                         ...packageForm,
                         description:
-                          e.target
-                            .value,
+                          e.target.value,
                       })
                     }
                     rows="4"
@@ -1883,12 +1969,9 @@ export default function Coach() {
                     value={
                       packageForm.access_type
                     }
-                    onChange={(
-                      e
-                    ) =>
+                    onChange={(e) =>
                       updateAccessType(
-                        e.target
-                          .value
+                        e.target.value
                       )
                     }
                   >
@@ -1898,12 +1981,8 @@ export default function Coach() {
                         text,
                       ]) => (
                         <option
-                          key={
-                            value
-                          }
-                          value={
-                            value
-                          }
+                          key={value}
+                          value={value}
                         >
                           {text}
                         </option>
@@ -1919,14 +1998,11 @@ export default function Coach() {
                     value={
                       packageForm.credit_type
                     }
-                    onChange={(
-                      e
-                    ) =>
+                    onChange={(e) =>
                       setPackageForm({
                         ...packageForm,
                         credit_type:
-                          e.target
-                            .value,
+                          e.target.value,
                       })
                     }
                   >
@@ -1936,12 +2012,8 @@ export default function Coach() {
                         text,
                       ]) => (
                         <option
-                          key={
-                            value
-                          }
-                          value={
-                            value
-                          }
+                          key={value}
+                          value={value}
                         >
                           {text}
                         </option>
@@ -1962,14 +2034,11 @@ export default function Coach() {
                       value={
                         packageForm.credits
                       }
-                      onChange={(
-                        e
-                      ) =>
+                      onChange={(e) =>
                         setPackageForm({
                           ...packageForm,
                           credits:
-                            e.target
-                              .value,
+                            e.target.value,
                         })
                       }
                       required
@@ -1989,14 +2058,11 @@ export default function Coach() {
                       value={
                         packageForm.duration_days
                       }
-                      onChange={(
-                        e
-                      ) =>
+                      onChange={(e) =>
                         setPackageForm({
                           ...packageForm,
                           duration_days:
-                            e.target
-                              .value,
+                            e.target.value,
                         })
                       }
                     />
@@ -2013,14 +2079,11 @@ export default function Coach() {
                       value={
                         packageForm.purchase_limit
                       }
-                      onChange={(
-                        e
-                      ) =>
+                      onChange={(e) =>
                         setPackageForm({
                           ...packageForm,
                           purchase_limit:
-                            e.target
-                              .value,
+                            e.target.value,
                         })
                       }
                     />
@@ -2036,14 +2099,11 @@ export default function Coach() {
                     value={
                       packageForm.sort_order
                     }
-                    onChange={(
-                      e
-                    ) =>
+                    onChange={(e) =>
                       setPackageForm({
                         ...packageForm,
                         sort_order:
-                          e.target
-                            .value,
+                          e.target.value,
                       })
                     }
                   />
@@ -2055,20 +2115,16 @@ export default function Coach() {
                     checked={
                       packageForm.active
                     }
-                    onChange={(
-                      e
-                    ) =>
+                    onChange={(e) =>
                       setPackageForm({
                         ...packageForm,
                         active:
-                          e.target
-                            .checked,
+                          e.target.checked,
                       })
                     }
                   />
 
-                  Available for
-                  purchase
+                  Available for purchase
                 </label>
 
                 <div className="notice">
@@ -2083,9 +2139,11 @@ export default function Coach() {
                         ?.price_cents
                     )}
                   </b>
+
                   <br />
 
                   Billing:{' '}
+
                   <b>
                     {packages.find(
                       (item) =>
@@ -2129,9 +2187,7 @@ export default function Coach() {
 
             {packageMsg && (
               <div className="notice">
-                {
-                  packageMsg
-                }
+                {packageMsg}
               </div>
             )}
           </section>
@@ -2146,15 +2202,11 @@ export default function Coach() {
                 (item) => (
                   <div
                     className="card packageAdminCard"
-                    key={
-                      item.id
-                    }
+                    key={item.id}
                   >
                     <div className="programTop">
                       <b>
-                        {
-                          item.name
-                        }
+                        {item.name}
                       </b>
 
                       <span
@@ -2183,6 +2235,7 @@ export default function Coach() {
                         {money(
                           item.price_cents
                         )}
+
                         {item.payment_type ===
                         'subscription'
                           ? ' / month'
