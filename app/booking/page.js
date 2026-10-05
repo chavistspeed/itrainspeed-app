@@ -63,6 +63,9 @@ function BookingContent() {
   const [accessChecked, setAccessChecked] =
     useState(false)
 
+  const [bookingSessionId, setBookingSessionId] =
+    useState('')
+
   async function loadBase() {
     const s = supabase()
 
@@ -80,15 +83,6 @@ function BookingContent() {
       return false
     }
 
-    /*
-     * WAIVER GUARDRAIL
-     *
-     * Booking is only available after the
-     * parent/guardian has accepted the current
-     * participation waiver.
-     *
-     * The database RPC also enforces this rule.
-     */
     const {
       data: profile,
       error: profileError,
@@ -168,12 +162,6 @@ function BookingContent() {
     setSessions(sessionData || [])
     setEnts(entitlementList)
 
-    /*
-     * If the customer arrived from a specific
-     * athlete-specific entitlement, that
-     * entitlement is the source of truth for
-     * which athlete is being booked.
-     */
     const exactEntitlement =
       requestedEntitlement
         ? entitlementList.find(
@@ -207,10 +195,6 @@ function BookingContent() {
 
   useEffect(() => {
     async function loadBooked() {
-      /*
-       * Do not query booking information until
-       * the waiver/authentication check passes.
-       */
       if (
         !accessChecked ||
         !athlete
@@ -253,13 +237,6 @@ function BookingContent() {
     )
   }
 
-  /*
-   * Locate the requested entitlement directly
-   * from all active entitlements first.
-   *
-   * This allows us to determine whether the
-   * entitlement itself is athlete-specific.
-   */
   const requestedEntitlementRecord =
     useMemo(() => {
       if (!requestedEntitlement) {
@@ -278,14 +255,6 @@ function BookingContent() {
       requestedEntitlement,
     ])
 
-  /*
-   * An entitlement is athlete-locked whenever
-   * it has an athlete_id.
-   *
-   * This automatically supports Founding,
-   * Track, and any future athlete-specific
-   * package without hard-coding package names.
-   */
   const lockedAthleteId =
     requestedEntitlementRecord?.athlete_id ||
     requestedAthlete ||
@@ -300,10 +269,6 @@ function BookingContent() {
       )
     )
 
-  /*
-   * Keep the selected athlete synchronized
-   * with an athlete-specific entitlement.
-   */
   useEffect(() => {
     if (
       athleteLocked &&
@@ -480,6 +445,74 @@ function BookingContent() {
       ? label(filter)
       : 'Training Access')
 
+  async function sendBookingNotification(
+    sessionId,
+    athleteId
+  ) {
+    try {
+      const s = supabase()
+
+      const {
+        data: { session },
+      } = await s.auth.getSession()
+
+      if (!session?.access_token) {
+        console.warn(
+          'Booking notification skipped because no active session token was available.'
+        )
+
+        return
+      }
+
+      const response =
+        await fetch(
+          '/api/notifications/new-booking',
+          {
+            method: 'POST',
+
+            headers: {
+              'Content-Type':
+                'application/json',
+
+              Authorization:
+                `Bearer ${session.access_token}`,
+            },
+
+            body: JSON.stringify({
+              session_id:
+                sessionId,
+
+              athlete_id:
+                athleteId,
+            }),
+          }
+        )
+
+      if (!response.ok) {
+        const result =
+          await response
+            .json()
+            .catch(() => null)
+
+        console.error(
+          'Booking notification failed:',
+          result?.error ||
+            response.statusText
+        )
+      }
+    } catch (error) {
+      /*
+       * The booking is already complete.
+       * An email failure must never make the
+       * customer think the reservation failed.
+       */
+      console.error(
+        'Booking notification error:',
+        error
+      )
+    }
+  }
+
   async function book(sessionId) {
     if (!athlete) {
       setMsg(
@@ -488,11 +521,10 @@ function BookingContent() {
       return
     }
 
-    /*
-     * Extra client-side protection.
-     * The database RPC remains the final
-     * authorization layer.
-     */
+    if (bookingSessionId) {
+      return
+    }
+
     if (
       athleteLocked &&
       athlete !== lockedAthleteId
@@ -514,73 +546,89 @@ function BookingContent() {
     }
 
     setMsg('')
+    setBookingSessionId(
+      sessionId
+    )
 
-    const { error } =
-      await supabase().rpc(
-        'book_session_v15',
-        {
-          p_session_id:
-            sessionId,
-          p_athlete_id:
-            athlete,
-          p_entitlement_id:
-            selectedEntitlement?.id ||
-            null,
+    try {
+      const s = supabase()
+
+      const { error } =
+        await s.rpc(
+          'book_session_v15',
+          {
+            p_session_id:
+              sessionId,
+
+            p_athlete_id:
+              athlete,
+
+            p_entitlement_id:
+              selectedEntitlement?.id ||
+              null,
+          }
+        )
+
+      if (error) {
+        if (
+          error.message
+            ?.toLowerCase()
+            .includes(
+              'participation waiver'
+            )
+        ) {
+          router.replace('/waiver')
+          return
         }
-      )
 
-    if (error) {
-      /*
-       * If the waiver somehow changed or became
-       * outdated after the page was loaded,
-       * send the customer back to the waiver.
-       */
-      if (
-        error.message
-          ?.toLowerCase()
-          .includes(
-            'participation waiver'
-          )
-      ) {
-        router.replace('/waiver')
+        setMsg(error.message)
         return
       }
 
-      setMsg(error.message)
-      return
-    }
+      /*
+       * The database has now confirmed the
+       * reservation. Notify the owner.
+       *
+       * We deliberately do not await this before
+       * showing the customer their success message.
+       */
+      sendBookingNotification(
+        sessionId,
+        athlete
+      )
 
-    setMsg(
-      'Training booked successfully.'
-    )
+      setMsg(
+        'Training booked successfully.'
+      )
 
-    await loadBase()
+      await loadBase()
 
-    const { data } =
-      await supabase()
-        .from('bookings')
-        .select('session_id')
-        .eq(
-          'athlete_id',
-          athlete
-        )
-        .eq('status', 'booked')
+      const { data } =
+        await s
+          .from('bookings')
+          .select('session_id')
+          .eq(
+            'athlete_id',
+            athlete
+          )
+          .eq(
+            'status',
+            'booked'
+          )
 
-    setBooked(
-      new Set(
-        (data || []).map(
-          (booking) =>
-            booking.session_id
+      setBooked(
+        new Set(
+          (data || []).map(
+            (booking) =>
+              booking.session_id
+          )
         )
       )
-    )
+    } finally {
+      setBookingSessionId('')
+    }
   }
 
-  /*
-   * Prevent the booking interface from briefly
-   * flashing before authentication/waiver
-   * verification finishes.
-   */
   if (!accessChecked) {
     return (
       <AppShell title="Book Training">
@@ -760,6 +808,10 @@ function BookingContent() {
                 session.id
               )
 
+            const isBooking =
+              bookingSessionId ===
+              session.id
+
             return (
               <article
                 className="session card"
@@ -819,7 +871,10 @@ function BookingContent() {
                   }
                   disabled={
                     full ||
-                    isBooked
+                    isBooked ||
+                    Boolean(
+                      bookingSessionId
+                    )
                   }
                   onClick={() =>
                     book(
@@ -831,7 +886,9 @@ function BookingContent() {
                     ? 'Booked'
                     : full
                       ? 'Full'
-                      : 'Book'}
+                      : isBooking
+                        ? 'Booking...'
+                        : 'Book'}
                 </button>
               </article>
             )
