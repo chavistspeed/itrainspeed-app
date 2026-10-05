@@ -18,16 +18,12 @@ const ACCESS_TYPES = [
 ]
 
 const serviceLabel = (type) =>
-  SERVICE_TYPES.find(
-    ([value]) => value === type
-  )?.[1] ||
+  SERVICE_TYPES.find(([value]) => value === type)?.[1] ||
   type ||
   'Group Training'
 
 const accessLabel = (type) =>
-  ACCESS_TYPES.find(
-    ([value]) => value === type
-  )?.[1] ||
+  ACCESS_TYPES.find(([value]) => value === type)?.[1] ||
   type ||
   'Credit Package'
 
@@ -57,38 +53,29 @@ const makeBlankPackage = () => ({
 })
 
 function money(cents) {
-  return (
-    Number(cents || 0) / 100
-  ).toLocaleString('en-US', {
+  return (Number(cents || 0) / 100).toLocaleString('en-US', {
     style: 'currency',
     currency: 'USD',
   })
 }
 
 export default function Coach() {
-  const [role, setRole] =
-    useState('')
+  const [role, setRole] = useState('')
 
-  const [programs, setPrograms] =
-    useState([])
+  const [programs, setPrograms] = useState([])
+  const [sessions, setSessions] = useState([])
+  const [packages, setPackages] = useState([])
 
-  const [sessions, setSessions] =
-    useState([])
+  // Athlete directory
+  const [athletes, setAthletes] = useState([])
+  const [athleteSearch, setAthleteSearch] = useState('')
+  const [athleteMsg, setAthleteMsg] = useState('')
 
-  const [packages, setPackages] =
-    useState([])
+  const [selected, setSelected] = useState(null)
+  const [roster, setRoster] = useState([])
+  const [rosterMsg, setRosterMsg] = useState('')
 
-  const [selected, setSelected] =
-    useState(null)
-
-  const [roster, setRoster] =
-    useState([])
-
-  const [rosterMsg, setRosterMsg] =
-    useState('')
-
-  const [tab, setTab] =
-    useState('schedule')
+  const [tab, setTab] = useState('schedule')
 
   const [f, setF] = useState({
     program_id: '',
@@ -99,28 +86,15 @@ export default function Coach() {
     repeat_weeks: 1,
   })
 
-  const [msg, setMsg] =
-    useState('')
+  const [msg, setMsg] = useState('')
+  const [pm, setPm] = useState('')
 
-  const [pm, setPm] =
-    useState('')
+  const [editing, setEditing] = useState(null)
+  const [pf, setPf] = useState(makeBlankProgram())
 
-  const [editing, setEditing] =
-    useState(null)
-
-  const [pf, setPf] =
-    useState(makeBlankProgram())
-
-  const [packageMsg, setPackageMsg] =
-    useState('')
-
-  const [
-    editingPackage,
-    setEditingPackage,
-  ] = useState(null)
-
-  const [packageForm, setPackageForm] =
-    useState(makeBlankPackage())
+  const [packageMsg, setPackageMsg] = useState('')
+  const [editingPackage, setEditingPackage] = useState(null)
+  const [packageForm, setPackageForm] = useState(makeBlankPackage())
 
   async function load() {
     const s = supabase()
@@ -136,6 +110,10 @@ export default function Coach() {
       { data: programRows },
       { data: sessionRows },
       { data: packageRows },
+      {
+        data: athleteRows,
+        error: athleteError,
+      },
     ] = await Promise.all([
       s.from('profiles')
         .select('role')
@@ -144,56 +122,41 @@ export default function Coach() {
 
       s.from('programs')
         .select('*')
-        .order(
-          'active',
-          {
-            ascending: false,
-          }
-        )
+        .order('active', {
+          ascending: false,
+        })
         .order('name'),
 
-      s.from(
-        'session_availability'
-      )
+      s.from('session_availability')
         .select('*')
-        .gte(
-          'start_at',
-          new Date().toISOString()
-        )
+        .gte('start_at', new Date().toISOString())
         .order('start_at')
         .limit(100),
 
       s.from('packages')
         .select('*')
-        .order(
-          'active',
-          {
-            ascending: false,
-          }
-        )
-        .order(
-          'sort_order',
-          {
-            ascending: true,
-          }
-        )
+        .order('active', {
+          ascending: false,
+        })
+        .order('sort_order', {
+          ascending: true,
+        })
         .order('name'),
+
+      s.rpc('get_coach_athletes_v1'),
     ])
 
-    setRole(
-      profile?.role || 'parent'
-    )
+    setRole(profile?.role || 'parent')
+    setPrograms(programRows || [])
+    setSessions(sessionRows || [])
+    setPackages(packageRows || [])
 
-    setPrograms(
-      programRows || []
-    )
+    setAthletes(athleteRows || [])
 
-    setSessions(
-      sessionRows || []
-    )
-
-    setPackages(
-      packageRows || []
+    setAthleteMsg(
+      athleteError
+        ? athleteError.message
+        : ''
     )
 
     setF((current) => ({
@@ -201,8 +164,7 @@ export default function Coach() {
       program_id:
         current.program_id ||
         programRows?.find(
-          (program) =>
-            program.active
+          (program) => program.active
         )?.id ||
         '',
     }))
@@ -227,23 +189,14 @@ export default function Coach() {
     } = await s.auth.getUser()
 
     if (!user) {
-      setMsg(
-        'Please sign in again.'
-      )
+      setMsg('Please sign in again.')
       return
     }
 
-    const base =
-      new Date(f.start_at)
+    const base = new Date(f.start_at)
 
-    if (
-      Number.isNaN(
-        base.getTime()
-      )
-    ) {
-      setMsg(
-        'Please select a valid date and time.'
-      )
+    if (Number.isNaN(base.getTime())) {
+      setMsg('Please select a valid date and time.')
       return
     }
 
@@ -251,60 +204,42 @@ export default function Coach() {
       1,
       Math.min(
         26,
-        Number(
-          f.repeat_weeks
-        ) || 1
+        Number(f.repeat_weeks) || 1
       )
     )
 
     const rows = Array.from(
       { length: count },
       (_, i) => ({
-        program_id:
-          f.program_id,
+        program_id: f.program_id,
 
-        start_at:
-          new Date(
-            base.getTime() +
-              i *
-                7 *
-                24 *
-                60 *
-                60 *
-                1000
-          ).toISOString(),
+        start_at: new Date(
+          base.getTime() +
+            i *
+              7 *
+              24 *
+              60 *
+              60 *
+              1000
+        ).toISOString(),
 
-        duration_minutes:
-          Number(
-            f.duration_minutes
-          ),
-
-        capacity:
-          Number(f.capacity),
-
-        location:
-          f.location,
-
-        created_by:
-          user.id,
-
-        status:
-          'published',
+        duration_minutes: Number(f.duration_minutes),
+        capacity: Number(f.capacity),
+        location: f.location,
+        created_by: user.id,
+        status: 'published',
       })
     )
 
-    const { error } =
-      await s
-        .from('sessions')
-        .insert(rows)
+    const { error } = await s
+      .from('sessions')
+      .insert(rows)
 
     setMsg(
       error
         ? error.message
         : `${count} session${
-            count > 1
-              ? 's'
-              : ''
+            count > 1 ? 's' : ''
           } published.`
     )
 
@@ -313,9 +248,7 @@ export default function Coach() {
     }
   }
 
-  async function openRoster(
-    session
-  ) {
+  async function openRoster(session) {
     setSelected(session)
     setRosterMsg('')
 
@@ -325,42 +258,34 @@ export default function Coach() {
     } = await supabase().rpc(
       'get_session_roster',
       {
-        p_session_id:
-          session.id,
+        p_session_id: session.id,
       }
     )
 
     if (error) {
       setRoster([])
-      setRosterMsg(
-        error.message
-      )
+      setRosterMsg(error.message)
       return
     }
 
     setRoster(data || [])
   }
 
-  async function cancelSession(
-    session
-  ) {
-    const confirmed =
-      confirm(
-        `Cancel ${session.program_name} on ${new Date(
-          session.start_at
-        ).toLocaleString()}? Booked athletes will have their credits restored.`
-      )
+  async function cancelSession(session) {
+    const confirmed = confirm(
+      `Cancel ${session.program_name} on ${new Date(
+        session.start_at
+      ).toLocaleString()}? Booked athletes will have their credits restored.`
+    )
 
     if (!confirmed) return
 
-    const { error } =
-      await supabase().rpc(
-        'admin_cancel_session',
-        {
-          p_session_id:
-            session.id,
-        }
-      )
+    const { error } = await supabase().rpc(
+      'admin_cancel_session',
+      {
+        p_session_id: session.id,
+      }
+    )
 
     setMsg(
       error
@@ -379,9 +304,7 @@ export default function Coach() {
      PROGRAMS
      ===================================================== */
 
-  function editProgram(
-    program
-  ) {
+  function editProgram(program) {
     const type =
       program.service_type ||
       program.credit_type ||
@@ -390,8 +313,7 @@ export default function Coach() {
     setEditing(program.id)
 
     setPf({
-      name:
-        program.name || '',
+      name: program.name || '',
 
       category:
         program.category ||
@@ -404,26 +326,22 @@ export default function Coach() {
         program.max_age ?? 18,
 
       credit_cost:
-        program.credit_cost ??
-        1,
+        program.credit_cost ?? 1,
 
       credit_type: type,
       service_type: type,
 
       price_cents:
-        program.price_cents ??
-        0,
+        program.price_cents ?? 0,
 
       price_dollars: (
         Number(
-          program.price_cents ??
-            0
+          program.price_cents ?? 0
         ) / 100
       ).toFixed(2),
 
       active:
-        program.active !==
-        false,
+        program.active !== false,
     })
 
     setTab('programs')
@@ -432,17 +350,11 @@ export default function Coach() {
 
   function cancelProgramEdit() {
     setEditing(null)
-
-    setPf(
-      makeBlankProgram()
-    )
-
+    setPf(makeBlankProgram())
     setPm('')
   }
 
-  function updateServiceType(
-    type
-  ) {
+  function updateServiceType(type) {
     setPf((current) => ({
       ...current,
       service_type: type,
@@ -455,28 +367,20 @@ export default function Coach() {
     setPm('')
 
     if (!pf.name.trim()) {
-      setPm(
-        'Please enter a program name.'
-      )
+      setPm('Please enter a program name.')
       return
     }
 
     if (!pf.service_type) {
-      setPm(
-        'Please select a service type.'
-      )
+      setPm('Please select a service type.')
       return
     }
 
     const priceDollars =
-      Number(
-        pf.price_dollars
-      )
+      Number(pf.price_dollars)
 
     if (
-      !Number.isFinite(
-        priceDollars
-      ) ||
+      !Number.isFinite(priceDollars) ||
       priceDollars < 0
     ) {
       setPm(
@@ -492,17 +396,11 @@ export default function Coach() {
       Number(pf.max_age)
 
     const creditCost =
-      Number(
-        pf.credit_cost
-      )
+      Number(pf.credit_cost)
 
     if (
-      !Number.isFinite(
-        minAge
-      ) ||
-      !Number.isFinite(
-        maxAge
-      ) ||
+      !Number.isFinite(minAge) ||
+      !Number.isFinite(maxAge) ||
       minAge < 0 ||
       maxAge < minAge
     ) {
@@ -513,9 +411,7 @@ export default function Coach() {
     }
 
     if (
-      !Number.isFinite(
-        creditCost
-      ) ||
+      !Number.isFinite(creditCost) ||
       creditCost < 0
     ) {
       setPm(
@@ -527,14 +423,12 @@ export default function Coach() {
     const payload = {
       name: pf.name.trim(),
 
-      category:
-        pf.category,
+      category: pf.category,
 
       min_age: minAge,
       max_age: maxAge,
 
-      credit_cost:
-        creditCost,
+      credit_cost: creditCost,
 
       credit_type:
         pf.service_type,
@@ -556,23 +450,17 @@ export default function Coach() {
     let result
 
     if (editing) {
-      result =
-        await s
-          .from('programs')
-          .update(payload)
-          .eq(
-            'id',
-            editing
-          )
+      result = await s
+        .from('programs')
+        .update(payload)
+        .eq('id', editing)
     } else {
-      result =
-        await s
-          .from('programs')
-          .insert(payload)
+      result = await s
+        .from('programs')
+        .insert(payload)
     }
 
-    const { error } =
-      result
+    const { error } = result
 
     setPm(
       error
@@ -584,29 +472,18 @@ export default function Coach() {
 
     if (!error) {
       setEditing(null)
-
-      setPf(
-        makeBlankProgram()
-      )
-
+      setPf(makeBlankProgram())
       await load()
     }
   }
 
-  async function toggleProgram(
-    program
-  ) {
-    const { error } =
-      await supabase()
-        .from('programs')
-        .update({
-          active:
-            !program.active,
-        })
-        .eq(
-          'id',
-          program.id
-        )
+  async function toggleProgram(program) {
+    const { error } = await supabase()
+      .from('programs')
+      .update({
+        active: !program.active,
+      })
+      .eq('id', program.id)
 
     setPm(
       error
@@ -627,20 +504,14 @@ export default function Coach() {
      PACKAGES
      ===================================================== */
 
-  function editPackage(
-    item
-  ) {
-    setEditingPackage(
-      item.id
-    )
+  function editPackage(item) {
+    setEditingPackage(item.id)
 
     setPackageForm({
-      name:
-        item.name || '',
+      name: item.name || '',
 
       description:
-        item.description ||
-        '',
+        item.description || '',
 
       access_type:
         item.access_type ||
@@ -654,12 +525,10 @@ export default function Coach() {
         item.credits ?? '',
 
       duration_days:
-        item.duration_days ??
-        '',
+        item.duration_days ?? '',
 
       purchase_limit:
-        item.purchase_limit ??
-        '',
+        item.purchase_limit ?? '',
 
       active:
         item.active !== false,
@@ -674,40 +543,26 @@ export default function Coach() {
 
   function cancelPackageEdit() {
     setEditingPackage(null)
-
-    setPackageForm(
-      makeBlankPackage()
-    )
-
+    setPackageForm(makeBlankPackage())
     setPackageMsg('')
   }
 
-  function updateAccessType(
-    type
-  ) {
+  function updateAccessType(type) {
     setPackageForm(
       (current) => ({
         ...current,
 
         access_type: type,
 
-        /*
-         * Memberships and promotions
-         * can be unlimited, so credits
-         * are optional.
-         */
         credits:
           type === 'credits'
-            ? current.credits ||
-              1
+            ? current.credits || 1
             : '',
       })
     )
   }
 
-  async function savePackage(
-    e
-  ) {
+  async function savePackage(e) {
     e.preventDefault()
 
     setPackageMsg('')
@@ -719,9 +574,7 @@ export default function Coach() {
       return
     }
 
-    if (
-      !packageForm.name.trim()
-    ) {
+    if (!packageForm.name.trim()) {
       setPackageMsg(
         'Please enter a package name.'
       )
@@ -864,18 +717,12 @@ export default function Coach() {
 
     if (!error) {
       setEditingPackage(null)
-
-      setPackageForm(
-        makeBlankPackage()
-      )
-
+      setPackageForm(makeBlankPackage())
       await load()
     }
   }
 
-  async function togglePackage(
-    item
-  ) {
+  async function togglePackage(item) {
     const confirmed =
       confirm(
         item.active
@@ -913,6 +760,42 @@ export default function Coach() {
   }
 
   /* =====================================================
+     ATHLETE SEARCH
+     ===================================================== */
+
+  const filteredAthletes =
+    athletes.filter(
+      (athlete) => {
+        const query =
+          athleteSearch
+            .trim()
+            .toLowerCase()
+
+        if (!query) {
+          return true
+        }
+
+        const searchable = [
+          athlete.first_name,
+          athlete.last_name,
+          athlete.sport,
+          athlete.age,
+        ]
+          .filter(
+            (value) =>
+              value !== null &&
+              value !== undefined
+          )
+          .join(' ')
+          .toLowerCase()
+
+        return searchable.includes(
+          query
+        )
+      }
+    )
+
+  /* =====================================================
      ACCESS CONTROL
      ===================================================== */
 
@@ -946,12 +829,23 @@ export default function Coach() {
                 : 'tab'
             }
             onClick={() =>
-              setTab(
-                'schedule'
-              )
+              setTab('schedule')
             }
           >
             Schedule
+          </button>
+
+          <button
+            className={
+              tab === 'athletes'
+                ? 'tab activeTab'
+                : 'tab'
+            }
+            onClick={() =>
+              setTab('athletes')
+            }
+          >
+            Athletes
           </button>
 
           <button
@@ -961,9 +855,7 @@ export default function Coach() {
                 : 'tab'
             }
             onClick={() =>
-              setTab(
-                'programs'
-              )
+              setTab('programs')
             }
           >
             Programs
@@ -976,9 +868,7 @@ export default function Coach() {
                 : 'tab'
             }
             onClick={() =>
-              setTab(
-                'packages'
-              )
+              setTab('packages')
             }
           >
             Packages
@@ -1177,8 +1067,7 @@ export default function Coach() {
                           key={n}
                           value={n}
                         >
-                          {n ===
-                          1
+                          {n === 1
                             ? 'No repeat'
                             : `${n} weeks`}
                         </option>
@@ -1344,8 +1233,7 @@ export default function Coach() {
                         }
                       >
                         <b>
-                          {i +
-                            1}
+                          {i + 1}
                           .{' '}
                           {
                             item.athlete_name
@@ -1373,6 +1261,149 @@ export default function Coach() {
             </section>
           )}
         </>
+      )}
+
+      {/* ===============================================
+          ATHLETES TAB
+          =============================================== */}
+
+      {tab === 'athletes' && (
+        <section>
+          <div className="card">
+            <div className="row">
+              <div>
+                <small>
+                  ATHLETE DIRECTORY
+                </small>
+
+                <h2>
+                  Registered Athletes
+                </h2>
+
+                <span>
+                  {athletes.length}{' '}
+                  athlete
+                  {athletes.length === 1
+                    ? ''
+                    : 's'}{' '}
+                  registered
+                </span>
+              </div>
+            </div>
+
+            <label
+              style={{
+                marginTop: '24px',
+              }}
+            >
+              Search athletes
+
+              <input
+                type="search"
+                placeholder="Search by athlete name, age, or sport..."
+                value={
+                  athleteSearch
+                }
+                onChange={(e) =>
+                  setAthleteSearch(
+                    e.target.value
+                  )
+                }
+              />
+            </label>
+
+            {athleteMsg && (
+              <div className="notice">
+                {athleteMsg}
+              </div>
+            )}
+          </div>
+
+          <div
+            style={{
+              marginTop: '20px',
+            }}
+          >
+            {!athleteMsg &&
+              filteredAthletes.map(
+                (athlete) => (
+                  <div
+                    className="card compact"
+                    key={
+                      athlete.athlete_id
+                    }
+                  >
+                    <div className="programTop">
+                      <b>
+                        {
+                          athlete.first_name
+                        }{' '}
+                        {
+                          athlete.last_name
+                        }
+                      </b>
+
+                      <span className="status activeStatus">
+                        Athlete
+                      </span>
+                    </div>
+
+                    <span>
+                      {athlete.age !==
+                        null &&
+                      athlete.age !==
+                        undefined
+                        ? `Age ${athlete.age}`
+                        : 'Age not provided'}
+
+                      {athlete.sport
+                        ? ` • ${athlete.sport}`
+                        : ''}
+                    </span>
+
+                    <span>
+                      Added{' '}
+                      {athlete.created_at
+                        ? new Date(
+                            athlete.created_at
+                          ).toLocaleDateString(
+                            'en-US',
+                            {
+                              month:
+                                'short',
+                              day:
+                                'numeric',
+                              year:
+                                'numeric',
+                            }
+                          )
+                        : '—'}
+                    </span>
+                  </div>
+                )
+              )}
+
+            {!athleteMsg &&
+              athletes.length ===
+                0 && (
+                <div className="empty">
+                  No registered
+                  athletes found.
+                </div>
+              )}
+
+            {!athleteMsg &&
+              athletes.length >
+                0 &&
+              filteredAthletes.length ===
+                0 && (
+                <div className="empty">
+                  No athletes match
+                  your search.
+                </div>
+              )}
+          </div>
+        </section>
       )}
 
       {/* ===============================================
