@@ -56,14 +56,189 @@ function serviceLabel(type) {
   )
 }
 
+function emailShell(content, footerText) {
+  return `
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <meta charset="UTF-8" />
+        <meta
+          name="viewport"
+          content="width=device-width, initial-scale=1.0"
+        />
+      </head>
+
+      <body
+        style="
+          margin:0;
+          padding:0;
+          background:#f4f4f4;
+          font-family:Arial,Helvetica,sans-serif;
+          color:#111111;
+        "
+      >
+        <table
+          role="presentation"
+          width="100%"
+          cellspacing="0"
+          cellpadding="0"
+          border="0"
+          style="
+            width:100%;
+            background:#f4f4f4;
+            padding:30px 15px;
+          "
+        >
+          <tr>
+            <td align="center">
+
+              <table
+                role="presentation"
+                width="100%"
+                cellspacing="0"
+                cellpadding="0"
+                border="0"
+                style="
+                  max-width:600px;
+                  background:#ffffff;
+                  border-radius:14px;
+                  overflow:hidden;
+                "
+              >
+
+                <tr>
+                  <td
+                    style="
+                      background:#000000;
+                      padding:28px 30px;
+                      text-align:center;
+                    "
+                  >
+                    <div
+                      style="
+                        color:#ffffff;
+                        font-size:28px;
+                        font-weight:800;
+                        letter-spacing:-1px;
+                      "
+                    >
+                      <span style="color:#e10600;">i</span>TrainSpeed
+                    </div>
+
+                    <div
+                      style="
+                        margin-top:7px;
+                        color:#bdbdbd;
+                        font-size:11px;
+                        font-weight:700;
+                        letter-spacing:2px;
+                      "
+                    >
+                      TRAIN. TRACK. DEVELOP.
+                    </div>
+                  </td>
+                </tr>
+
+                <tr>
+                  <td style="padding:34px 32px;">
+                    ${content}
+                  </td>
+                </tr>
+
+                <tr>
+                  <td
+                    style="
+                      padding:22px 30px;
+                      background:#f8f8f8;
+                      text-align:center;
+                      color:#888888;
+                      font-size:12px;
+                      line-height:1.6;
+                    "
+                  >
+                    ${footerText}
+                    <br />
+                    TRAIN. TRACK. DEVELOP.
+                  </td>
+                </tr>
+
+              </table>
+
+            </td>
+          </tr>
+        </table>
+      </body>
+    </html>
+  `
+}
+
+function detailRow(label, value) {
+  return `
+    <tr>
+      <td
+        style="
+          padding:14px 18px;
+          border-top:1px solid #eeeeee;
+          color:#777777;
+          font-size:14px;
+        "
+      >
+        ${label}
+      </td>
+
+      <td
+        align="right"
+        style="
+          padding:14px 18px;
+          border-top:1px solid #eeeeee;
+          font-size:14px;
+          font-weight:700;
+        "
+      >
+        ${value}
+      </td>
+    </tr>
+  `
+}
+
+function detailTable(title, rows) {
+  return `
+    <table
+      role="presentation"
+      width="100%"
+      cellspacing="0"
+      cellpadding="0"
+      border="0"
+      style="
+        width:100%;
+        border:1px solid #e5e5e5;
+        border-radius:10px;
+        margin-bottom:20px;
+      "
+    >
+      <tr>
+        <td
+          colspan="2"
+          style="
+            padding:15px 18px;
+            background:#f8f8f8;
+            font-size:13px;
+            font-weight:800;
+            text-transform:uppercase;
+            letter-spacing:1px;
+          "
+        >
+          ${title}
+        </td>
+      </tr>
+
+      ${rows}
+    </table>
+  `
+}
+
 export async function POST(request) {
   try {
-    /*
-     * -------------------------------------------------------
-     * SERVER CONFIGURATION
-     * -------------------------------------------------------
-     */
-
     const supabaseUrl =
       process.env.NEXT_PUBLIC_SUPABASE_URL
 
@@ -114,9 +289,7 @@ export async function POST(request) {
     }
 
     /*
-     * -------------------------------------------------------
      * VERIFY AUTHENTICATED PARENT
-     * -------------------------------------------------------
      */
 
     const authorization =
@@ -193,9 +366,7 @@ export async function POST(request) {
     }
 
     /*
-     * -------------------------------------------------------
      * REQUEST DATA
-     * -------------------------------------------------------
      */
 
     let body
@@ -232,9 +403,7 @@ export async function POST(request) {
     }
 
     /*
-     * -------------------------------------------------------
      * VERIFY ATHLETE OWNERSHIP
-     * -------------------------------------------------------
      */
 
     const {
@@ -242,16 +411,14 @@ export async function POST(request) {
       error: athleteError,
     } = await supabase
       .from('athletes')
-      .select(
-        `
-          id,
-          guardian_id,
-          first_name,
-          last_name,
-          age,
-          sport
-        `
-      )
+      .select(`
+        id,
+        guardian_id,
+        first_name,
+        last_name,
+        age,
+        sport
+      `)
       .eq('id', athleteId)
       .eq('guardian_id', user.id)
       .single()
@@ -273,14 +440,7 @@ export async function POST(request) {
     }
 
     /*
-     * -------------------------------------------------------
-     * VERIFY CONFIRMED BOOKING EXISTS
-     *
-     * This is important:
-     * receiving a session ID from the browser is not enough.
-     * We only send an email when the database confirms that
-     * this parent + athlete + session has status "booked".
-     * -------------------------------------------------------
+     * VERIFY CONFIRMED BOOKING
      */
 
     const {
@@ -288,18 +448,16 @@ export async function POST(request) {
       error: bookingError,
     } = await supabase
       .from('bookings')
-      .select(
-        `
-          id,
-          session_id,
-          athlete_id,
-          guardian_id,
-          status,
-          credit_cost,
-          entitlement_id,
-          created_at
-        `
-      )
+      .select(`
+        id,
+        session_id,
+        athlete_id,
+        guardian_id,
+        status,
+        credit_cost,
+        entitlement_id,
+        created_at
+      `)
       .eq('session_id', sessionId)
       .eq('athlete_id', athleteId)
       .eq('guardian_id', user.id)
@@ -314,8 +472,7 @@ export async function POST(request) {
 
       return Response.json(
         {
-          error:
-            'Unable to verify booking.',
+          error: 'Unable to verify booking.',
         },
         {
           status: 500,
@@ -326,8 +483,7 @@ export async function POST(request) {
     if (!booking) {
       return Response.json(
         {
-          error:
-            'Confirmed booking not found.',
+          error: 'Confirmed booking not found.',
         },
         {
           status: 404,
@@ -336,9 +492,7 @@ export async function POST(request) {
     }
 
     /*
-     * -------------------------------------------------------
-     * GET SESSION INFORMATION
-     * -------------------------------------------------------
+     * GET SESSION
      */
 
     const {
@@ -358,8 +512,7 @@ export async function POST(request) {
 
       return Response.json(
         {
-          error:
-            'Training session not found.',
+          error: 'Training session not found.',
         },
         {
           status: 404,
@@ -368,9 +521,7 @@ export async function POST(request) {
     }
 
     /*
-     * -------------------------------------------------------
      * GET PARENT PROFILE
-     * -------------------------------------------------------
      */
 
     const {
@@ -390,9 +541,7 @@ export async function POST(request) {
     }
 
     /*
-     * -------------------------------------------------------
-     * GET ACCESS / ENTITLEMENT INFORMATION
-     * -------------------------------------------------------
+     * TRAINING ACCESS
      */
 
     let accessName =
@@ -439,17 +588,17 @@ export async function POST(request) {
             entitlement.credit_type
           )
 
+        const credits =
+          Number(
+            entitlement.credits_remaining ||
+              0
+          )
+
         accessRemaining =
           entitlement.unlimited
             ? 'Unlimited active access'
-            : `${Number(
-                entitlement.credits_remaining ||
-                  0
-              )} ${
-                Number(
-                  entitlement.credits_remaining ||
-                    0
-                ) === 1
+            : `${credits} ${
+                credits === 1
                   ? 'credit'
                   : 'credits'
               } remaining`
@@ -457,9 +606,7 @@ export async function POST(request) {
     }
 
     /*
-     * -------------------------------------------------------
-     * PREPARE EMAIL VALUES
-     * -------------------------------------------------------
+     * PREPARE VALUES
      */
 
     const athleteName = [
@@ -470,13 +617,18 @@ export async function POST(request) {
       .join(' ')
       .trim()
 
+    const firstName =
+      parentProfile?.full_name
+        ?.trim()
+        ?.split(/\s+/)?.[0] ||
+      'there'
+
     const parentName =
       parentProfile?.full_name ||
       'Parent / Guardian'
 
     const parentEmail =
-      user.email ||
-      'Not available'
+      user.email || ''
 
     const programName =
       session.program_name ||
@@ -515,15 +667,20 @@ export async function POST(request) {
 
     const safeAthleteName =
       escapeHtml(
-        athleteName ||
-          'Athlete'
+        athleteName || 'Athlete'
       )
+
+    const safeFirstName =
+      escapeHtml(firstName)
 
     const safeParentName =
       escapeHtml(parentName)
 
     const safeParentEmail =
-      escapeHtml(parentEmail)
+      escapeHtml(
+        parentEmail ||
+          'Not available'
+      )
 
     const safeProgramName =
       escapeHtml(programName)
@@ -555,9 +712,7 @@ export async function POST(request) {
       )
 
     /*
-     * -------------------------------------------------------
-     * GOOGLE WORKSPACE SMTP
-     * -------------------------------------------------------
+     * SMTP
      */
 
     const transporter =
@@ -573,572 +728,140 @@ export async function POST(request) {
       })
 
     /*
-     * -------------------------------------------------------
-     * EMAIL
-     * -------------------------------------------------------
+     * OWNER EMAIL
      */
 
-    const subject =
+    const ownerSubject =
       `📅 New Booking — ${athleteName || 'Athlete'}`
 
-    const html = `
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <meta charset="UTF-8" />
-          <meta
-            name="viewport"
-            content="width=device-width, initial-scale=1.0"
-          />
-        </head>
-
-        <body
-          style="
-            margin:0;
-            padding:0;
-            background:#f4f4f4;
-            font-family:Arial,Helvetica,sans-serif;
-            color:#111111;
-          "
-        >
-
-          <table
-            role="presentation"
-            width="100%"
-            cellspacing="0"
-            cellpadding="0"
-            border="0"
+    const ownerHtml =
+      emailShell(
+        `
+          <div
             style="
-              width:100%;
-              background:#f4f4f4;
-              padding:30px 15px;
+              font-size:12px;
+              font-weight:800;
+              color:#e10600;
+              text-transform:uppercase;
+              letter-spacing:1.5px;
+              margin-bottom:10px;
             "
           >
-            <tr>
-              <td align="center">
+            New Booking
+          </div>
 
-                <table
-                  role="presentation"
-                  width="100%"
-                  cellspacing="0"
-                  cellpadding="0"
-                  border="0"
-                  style="
-                    max-width:600px;
-                    background:#ffffff;
-                    border-radius:14px;
-                    overflow:hidden;
-                  "
-                >
+          <h1
+            style="
+              margin:0 0 8px 0;
+              font-size:27px;
+              line-height:1.2;
+            "
+          >
+            ${safeAthleteName}
+          </h1>
 
-                  <tr>
-                    <td
-                      style="
-                        background:#000000;
-                        padding:28px 30px;
-                        text-align:center;
-                      "
-                    >
-                      <div
-                        style="
-                          color:#ffffff;
-                          font-size:28px;
-                          font-weight:800;
-                          letter-spacing:-1px;
-                        "
-                      >
-                        <span
-                          style="color:#e10600;"
-                        >i</span>TrainSpeed
-                      </div>
+          <p
+            style="
+              margin:0 0 28px 0;
+              color:#666666;
+              font-size:15px;
+              line-height:1.6;
+            "
+          >
+            A training session has been booked successfully.
+          </p>
 
-                      <div
-                        style="
-                          margin-top:7px;
-                          color:#bdbdbd;
-                          font-size:11px;
-                          font-weight:700;
-                          letter-spacing:2px;
-                        "
-                      >
-                        TRAIN. TRACK. DEVELOP.
-                      </div>
-                    </td>
-                  </tr>
+          ${detailTable(
+            'Training Session',
+            detailRow(
+              'Program',
+              safeProgramName
+            ) +
+            detailRow(
+              'Training Type',
+              safeServiceType
+            ) +
+            detailRow(
+              'Date',
+              safeSessionDate
+            ) +
+            detailRow(
+              'Time',
+              safeSessionTime
+            ) +
+            detailRow(
+              'Duration',
+              safeDuration
+            ) +
+            detailRow(
+              'Location',
+              safeLocation
+            )
+          )}
 
-                  <tr>
-                    <td
-                      style="
-                        padding:34px 32px;
-                      "
-                    >
+          ${detailTable(
+            'Athlete & Parent',
+            detailRow(
+              'Athlete',
+              safeAthleteName
+            ) +
+            detailRow(
+              'Parent',
+              safeParentName
+            ) +
+            detailRow(
+              'Email',
+              safeParentEmail
+            )
+          )}
 
-                      <div
-                        style="
-                          font-size:12px;
-                          font-weight:800;
-                          color:#e10600;
-                          text-transform:uppercase;
-                          letter-spacing:1.5px;
-                          margin-bottom:10px;
-                        "
-                      >
-                        New Booking
-                      </div>
+          ${detailTable(
+            'Training Access',
+            detailRow(
+              'Access',
+              safeAccessName
+            ) +
+            detailRow(
+              'Remaining',
+              safeAccessRemaining
+            )
+          )}
 
-                      <h1
-                        style="
-                          margin:0 0 8px 0;
-                          font-size:27px;
-                          line-height:1.2;
-                        "
-                      >
-                        ${safeAthleteName}
-                      </h1>
+          <div
+            style="
+              background:#111111;
+              color:#ffffff;
+              padding:18px;
+              border-radius:10px;
+            "
+          >
+            <div
+              style="
+                color:#999999;
+                font-size:11px;
+                font-weight:800;
+                text-transform:uppercase;
+                letter-spacing:1px;
+                margin-bottom:6px;
+              "
+            >
+              Booking Confirmed
+            </div>
 
-                      <p
-                        style="
-                          margin:0 0 28px 0;
-                          color:#666666;
-                          font-size:15px;
-                          line-height:1.6;
-                        "
-                      >
-                        A training session has been booked successfully.
-                      </p>
+            <div
+              style="
+                font-size:15px;
+                font-weight:700;
+              "
+            >
+              ${safeBookingTime}
+            </div>
+          </div>
+        `,
+        'iTrainSpeed Owner Notification'
+      )
 
-                      <table
-                        role="presentation"
-                        width="100%"
-                        cellspacing="0"
-                        cellpadding="0"
-                        border="0"
-                        style="
-                          width:100%;
-                          border:1px solid #e5e5e5;
-                          border-radius:10px;
-                          margin-bottom:20px;
-                        "
-                      >
-
-                        <tr>
-                          <td
-                            colspan="2"
-                            style="
-                              padding:15px 18px;
-                              background:#f8f8f8;
-                              font-size:13px;
-                              font-weight:800;
-                              text-transform:uppercase;
-                              letter-spacing:1px;
-                            "
-                          >
-                            Training Session
-                          </td>
-                        </tr>
-
-                        <tr>
-                          <td
-                            style="
-                              padding:14px 18px;
-                              border-top:1px solid #eeeeee;
-                              color:#777777;
-                              font-size:14px;
-                            "
-                          >
-                            Program
-                          </td>
-
-                          <td
-                            align="right"
-                            style="
-                              padding:14px 18px;
-                              border-top:1px solid #eeeeee;
-                              font-size:14px;
-                              font-weight:700;
-                            "
-                          >
-                            ${safeProgramName}
-                          </td>
-                        </tr>
-
-                        <tr>
-                          <td
-                            style="
-                              padding:14px 18px;
-                              border-top:1px solid #eeeeee;
-                              color:#777777;
-                              font-size:14px;
-                            "
-                          >
-                            Training Type
-                          </td>
-
-                          <td
-                            align="right"
-                            style="
-                              padding:14px 18px;
-                              border-top:1px solid #eeeeee;
-                              font-size:14px;
-                              font-weight:700;
-                            "
-                          >
-                            ${safeServiceType}
-                          </td>
-                        </tr>
-
-                        <tr>
-                          <td
-                            style="
-                              padding:14px 18px;
-                              border-top:1px solid #eeeeee;
-                              color:#777777;
-                              font-size:14px;
-                            "
-                          >
-                            Date
-                          </td>
-
-                          <td
-                            align="right"
-                            style="
-                              padding:14px 18px;
-                              border-top:1px solid #eeeeee;
-                              font-size:14px;
-                              font-weight:700;
-                            "
-                          >
-                            ${safeSessionDate}
-                          </td>
-                        </tr>
-
-                        <tr>
-                          <td
-                            style="
-                              padding:14px 18px;
-                              border-top:1px solid #eeeeee;
-                              color:#777777;
-                              font-size:14px;
-                            "
-                          >
-                            Time
-                          </td>
-
-                          <td
-                            align="right"
-                            style="
-                              padding:14px 18px;
-                              border-top:1px solid #eeeeee;
-                              font-size:14px;
-                              font-weight:700;
-                            "
-                          >
-                            ${safeSessionTime}
-                          </td>
-                        </tr>
-
-                        <tr>
-                          <td
-                            style="
-                              padding:14px 18px;
-                              border-top:1px solid #eeeeee;
-                              color:#777777;
-                              font-size:14px;
-                            "
-                          >
-                            Duration
-                          </td>
-
-                          <td
-                            align="right"
-                            style="
-                              padding:14px 18px;
-                              border-top:1px solid #eeeeee;
-                              font-size:14px;
-                              font-weight:700;
-                            "
-                          >
-                            ${safeDuration}
-                          </td>
-                        </tr>
-
-                        <tr>
-                          <td
-                            style="
-                              padding:14px 18px;
-                              border-top:1px solid #eeeeee;
-                              color:#777777;
-                              font-size:14px;
-                            "
-                          >
-                            Location
-                          </td>
-
-                          <td
-                            align="right"
-                            style="
-                              padding:14px 18px;
-                              border-top:1px solid #eeeeee;
-                              font-size:14px;
-                              font-weight:700;
-                            "
-                          >
-                            ${safeLocation}
-                          </td>
-                        </tr>
-
-                      </table>
-
-                      <table
-                        role="presentation"
-                        width="100%"
-                        cellspacing="0"
-                        cellpadding="0"
-                        border="0"
-                        style="
-                          width:100%;
-                          border:1px solid #e5e5e5;
-                          border-radius:10px;
-                          margin-bottom:20px;
-                        "
-                      >
-
-                        <tr>
-                          <td
-                            colspan="2"
-                            style="
-                              padding:15px 18px;
-                              background:#f8f8f8;
-                              font-size:13px;
-                              font-weight:800;
-                              text-transform:uppercase;
-                              letter-spacing:1px;
-                            "
-                          >
-                            Athlete & Parent
-                          </td>
-                        </tr>
-
-                        <tr>
-                          <td
-                            style="
-                              padding:14px 18px;
-                              border-top:1px solid #eeeeee;
-                              color:#777777;
-                              font-size:14px;
-                            "
-                          >
-                            Athlete
-                          </td>
-
-                          <td
-                            align="right"
-                            style="
-                              padding:14px 18px;
-                              border-top:1px solid #eeeeee;
-                              font-size:14px;
-                              font-weight:700;
-                            "
-                          >
-                            ${safeAthleteName}
-                          </td>
-                        </tr>
-
-                        <tr>
-                          <td
-                            style="
-                              padding:14px 18px;
-                              border-top:1px solid #eeeeee;
-                              color:#777777;
-                              font-size:14px;
-                            "
-                          >
-                            Parent
-                          </td>
-
-                          <td
-                            align="right"
-                            style="
-                              padding:14px 18px;
-                              border-top:1px solid #eeeeee;
-                              font-size:14px;
-                              font-weight:700;
-                            "
-                          >
-                            ${safeParentName}
-                          </td>
-                        </tr>
-
-                        <tr>
-                          <td
-                            style="
-                              padding:14px 18px;
-                              border-top:1px solid #eeeeee;
-                              color:#777777;
-                              font-size:14px;
-                            "
-                          >
-                            Email
-                          </td>
-
-                          <td
-                            align="right"
-                            style="
-                              padding:14px 18px;
-                              border-top:1px solid #eeeeee;
-                              font-size:14px;
-                              font-weight:700;
-                            "
-                          >
-                            ${safeParentEmail}
-                          </td>
-                        </tr>
-
-                      </table>
-
-                      <table
-                        role="presentation"
-                        width="100%"
-                        cellspacing="0"
-                        cellpadding="0"
-                        border="0"
-                        style="
-                          width:100%;
-                          border:1px solid #e5e5e5;
-                          border-radius:10px;
-                          margin-bottom:20px;
-                        "
-                      >
-
-                        <tr>
-                          <td
-                            colspan="2"
-                            style="
-                              padding:15px 18px;
-                              background:#f8f8f8;
-                              font-size:13px;
-                              font-weight:800;
-                              text-transform:uppercase;
-                              letter-spacing:1px;
-                            "
-                          >
-                            Training Access
-                          </td>
-                        </tr>
-
-                        <tr>
-                          <td
-                            style="
-                              padding:14px 18px;
-                              border-top:1px solid #eeeeee;
-                              color:#777777;
-                              font-size:14px;
-                            "
-                          >
-                            Access
-                          </td>
-
-                          <td
-                            align="right"
-                            style="
-                              padding:14px 18px;
-                              border-top:1px solid #eeeeee;
-                              font-size:14px;
-                              font-weight:700;
-                            "
-                          >
-                            ${safeAccessName}
-                          </td>
-                        </tr>
-
-                        <tr>
-                          <td
-                            style="
-                              padding:14px 18px;
-                              border-top:1px solid #eeeeee;
-                              color:#777777;
-                              font-size:14px;
-                            "
-                          >
-                            Remaining
-                          </td>
-
-                          <td
-                            align="right"
-                            style="
-                              padding:14px 18px;
-                              border-top:1px solid #eeeeee;
-                              font-size:14px;
-                              font-weight:700;
-                            "
-                          >
-                            ${safeAccessRemaining}
-                          </td>
-                        </tr>
-
-                      </table>
-
-                      <div
-                        style="
-                          background:#111111;
-                          color:#ffffff;
-                          padding:18px;
-                          border-radius:10px;
-                        "
-                      >
-                        <div
-                          style="
-                            color:#999999;
-                            font-size:11px;
-                            font-weight:800;
-                            text-transform:uppercase;
-                            letter-spacing:1px;
-                            margin-bottom:6px;
-                          "
-                        >
-                          Booking Confirmed
-                        </div>
-
-                        <div
-                          style="
-                            font-size:15px;
-                            font-weight:700;
-                          "
-                        >
-                          ${safeBookingTime}
-                        </div>
-                      </div>
-
-                    </td>
-                  </tr>
-
-                  <tr>
-                    <td
-                      style="
-                        padding:22px 30px;
-                        background:#f8f8f8;
-                        text-align:center;
-                        color:#888888;
-                        font-size:12px;
-                        line-height:1.6;
-                      "
-                    >
-                      iTrainSpeed Owner Notification
-                      <br />
-                      TRAIN. TRACK. DEVELOP.
-                    </td>
-                  </tr>
-
-                </table>
-
-              </td>
-            </tr>
-          </table>
-        </body>
-      </html>
-    `
-
-    const text = `
+    const ownerText = `
 NEW iTRAINSPEED BOOKING
 
 ATHLETE
@@ -1146,7 +869,7 @@ ${athleteName}
 
 PARENT / GUARDIAN
 ${parentName}
-${parentEmail}
+${parentEmail || 'Not available'}
 
 TRAINING
 Program: ${programName}
@@ -1167,35 +890,303 @@ iTrainSpeed
 TRAIN. TRACK. DEVELOP.
     `.trim()
 
-    await transporter.sendMail({
-      from:
-        `"iTrainSpeed" <${smtpUser}>`,
+    /*
+     * PARENT CONFIRMATION EMAIL
+     */
 
-      to: ownerEmail,
+    const parentSubject =
+      `Training Confirmed — ${athleteName || 'iTrainSpeed'}`
 
-      replyTo:
-        user.email || smtpUser,
+    const appUrl =
+      'https://app.itrainspeed.com'
 
-      subject,
-      text,
-      html,
-    })
+    const parentHtml =
+      emailShell(
+        `
+          <div
+            style="
+              font-size:12px;
+              font-weight:800;
+              color:#e10600;
+              text-transform:uppercase;
+              letter-spacing:1.5px;
+              margin-bottom:10px;
+            "
+          >
+            Booking Confirmed
+          </div>
+
+          <h1
+            style="
+              margin:0 0 12px 0;
+              font-size:27px;
+              line-height:1.2;
+            "
+          >
+            You're booked.
+          </h1>
+
+          <p
+            style="
+              margin:0 0 26px 0;
+              color:#555555;
+              font-size:15px;
+              line-height:1.7;
+            "
+          >
+            Hi ${safeFirstName}, ${safeAthleteName}'s
+            training session with iTrainSpeed is confirmed.
+            Here are the details.
+          </p>
+
+          ${detailTable(
+            'Training Details',
+            detailRow(
+              'Athlete',
+              safeAthleteName
+            ) +
+            detailRow(
+              'Program',
+              safeProgramName
+            ) +
+            detailRow(
+              'Training Type',
+              safeServiceType
+            ) +
+            detailRow(
+              'Date',
+              safeSessionDate
+            ) +
+            detailRow(
+              'Time',
+              safeSessionTime
+            ) +
+            detailRow(
+              'Duration',
+              safeDuration
+            ) +
+            detailRow(
+              'Location',
+              safeLocation
+            )
+          )}
+
+          ${detailTable(
+            'Your Training Access',
+            detailRow(
+              'Access',
+              safeAccessName
+            ) +
+            detailRow(
+              'Remaining',
+              safeAccessRemaining
+            )
+          )}
+
+          <div
+            style="
+              background:#fff7f7;
+              border:1px solid #f1d0d0;
+              border-left:4px solid #e10600;
+              padding:18px;
+              border-radius:8px;
+              margin:4px 0 26px 0;
+            "
+          >
+            <div
+              style="
+                font-size:13px;
+                font-weight:800;
+                margin-bottom:7px;
+              "
+            >
+              Cancellation Policy
+            </div>
+
+            <div
+              style="
+                color:#555555;
+                font-size:13px;
+                line-height:1.6;
+              "
+            >
+              Sessions must be cancelled at least
+              6 hours before the scheduled start time
+              for the training credit to be returned.
+              Cancellations made within 6 hours of the
+              session and no-shows will forfeit the
+              training credit. Exceptions may be made
+              at iTrainSpeed's discretion.
+            </div>
+          </div>
+
+          <div style="text-align:center;">
+            <a
+              href="${appUrl}"
+              style="
+                display:inline-block;
+                background:#e10600;
+                color:#ffffff;
+                text-decoration:none;
+                font-size:14px;
+                font-weight:800;
+                padding:14px 24px;
+                border-radius:8px;
+              "
+            >
+              Open iTrainSpeed
+            </a>
+          </div>
+
+          <p
+            style="
+              margin:28px 0 0 0;
+              color:#777777;
+              font-size:13px;
+              line-height:1.6;
+              text-align:center;
+            "
+          >
+            We'll see you at training.
+          </p>
+        `,
+        'iTrainSpeed Training Confirmation'
+      )
+
+    const parentText = `
+YOUR iTRAINSPEED TRAINING IS CONFIRMED
+
+Hi ${firstName},
+
+${athleteName}'s training session is confirmed.
+
+TRAINING DETAILS
+Athlete: ${athleteName}
+Program: ${programName}
+Type: ${serviceType}
+Date: ${sessionDate}
+Time: ${sessionTime}
+Duration: ${duration}
+Location: ${location}
+
+TRAINING ACCESS
+${accessName}
+${accessRemaining}
+
+CANCELLATION POLICY
+Sessions must be cancelled at least 6 hours before the scheduled start time for the training credit to be returned. Cancellations made within 6 hours of the session and no-shows will forfeit the training credit. Exceptions may be made at iTrainSpeed's discretion.
+
+Open iTrainSpeed:
+${appUrl}
+
+TRAIN. TRACK. DEVELOP.
+    `.trim()
+
+    /*
+     * SEND OWNER EMAIL
+     *
+     * Each email is isolated. If one fails,
+     * we still attempt to send the other.
+     */
+
+    let ownerSent = false
+    let parentSent = false
+
+    try {
+      await transporter.sendMail({
+        from:
+          `"iTrainSpeed" <${smtpUser}>`,
+
+        to: ownerEmail,
+
+        replyTo:
+          parentEmail ||
+          smtpUser,
+
+        subject:
+          ownerSubject,
+
+        text:
+          ownerText,
+
+        html:
+          ownerHtml,
+      })
+
+      ownerSent = true
+    } catch (error) {
+      console.error(
+        'Owner booking notification failed:',
+        error
+      )
+    }
+
+    /*
+     * SEND PARENT EMAIL
+     */
+
+    if (parentEmail) {
+      try {
+        await transporter.sendMail({
+          from:
+            `"iTrainSpeed" <${smtpUser}>`,
+
+          to:
+            parentEmail,
+
+          replyTo:
+            smtpUser,
+
+          subject:
+            parentSubject,
+
+          text:
+            parentText,
+
+          html:
+            parentHtml,
+        })
+
+        parentSent = true
+      } catch (error) {
+        console.error(
+          'Parent booking confirmation failed:',
+          error
+        )
+      }
+    } else {
+      console.warn(
+        'Parent booking confirmation skipped: no parent email.'
+      )
+    }
 
     console.log(
-      'New booking notification sent.',
+      'Booking notification processing complete.',
       {
         bookingId:
           booking.id,
+
         sessionId,
+
         athleteId,
+
         guardianId:
           user.id,
+
+        ownerSent,
+
+        parentSent,
       }
     )
 
     return Response.json({
       ok: true,
-      booking_id: booking.id,
+      booking_id:
+        booking.id,
+      owner_notification_sent:
+        ownerSent,
+      parent_confirmation_sent:
+        parentSent,
     })
   } catch (error) {
     console.error(
@@ -1206,7 +1197,7 @@ TRAIN. TRACK. DEVELOP.
     return Response.json(
       {
         error:
-          'Unable to send booking notification.',
+          'Unable to process booking notifications.',
       },
       {
         status: 500,
