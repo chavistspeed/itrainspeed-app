@@ -1,3 +1,15 @@
+## Pending review: Movement Assessment & automatic scheduling
+
+The `feature/movement-assessment-onboarding` branch contains the updated 45-minute movement rubric, standing calendar and separate performance benchmarks. It is not deployed. Read [the review guide](docs/movement-assessment-review.md) before applying the new migration or planning rollout. Automatic Git deployments are disabled for this branch.
+
+# Intro calendar and family approval — review branch
+
+See [review notes and rollout prerequisites](docs/intro-calendar-review.md).
+
+This local branch adds `/intro`, `/coach/intro`, an additive approval/calendar migration, and local tests. Nothing is deployed. Do not follow the historical deployment instructions below for this branch before reviewing the new migration and schema compatibility findings and staging prerequisites.
+
+---
+
 # iTrainSpeed Production V1.4.1
 
 Wallet and booking UX patch on top of V1.4.

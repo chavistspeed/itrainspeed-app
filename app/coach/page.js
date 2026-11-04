@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import Link from 'next/link'
 import AppShell from '../../components/AppShell'
 import { supabase } from '../../lib/supabase'
 
@@ -804,6 +805,7 @@ export default function Coach() {
   ) {
     return (
       <AppShell title="Coach">
+      <p><a href="/coach/assessments">Athlete assessments, movement rubrics & performance benchmarks</a></p>
         <div className="card">
           <h1>
             Coach access required
@@ -2328,6 +2330,7 @@ export default function Coach() {
           </section>
         </div>
       )}
+    <p><Link href="/coach/intro">Intro calls, availability &amp; family approvals →</Link></p>
     </AppShell>
   )
 }

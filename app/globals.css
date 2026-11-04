@@ -1000,3 +1000,25 @@ select {
     padding-right: 2px;
   }
 }
+
+.introSlots { display: flex; flex-wrap: wrap; gap: 12px; margin: 20px 0; }
+.introSlots button { width: auto; }
+
+/* Athlete history graph uses the existing product palette. */
+.athleteProgress { min-width: 0; margin: 20px 0; }
+.athleteProgress h3 { margin-bottom: 12px; }
+.athleteProgress select { width: 100%; min-width: 0; }
+.progressStats { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 12px; }
+.progressStats p { font-size: 13px; overflow-wrap: anywhere; }
+.progressStats strong { display: block; font-size: 22px; margin: 6px 0; font-variant-numeric: tabular-nums; }
+.progressStats span, .progressLegend { color: #586272; font-size: 12px; }
+.progressPoint { cursor: pointer; }
+.progressPoint:focus { outline: 2px solid #15171a; }
+.progressDetail { padding: 12px 0; border-top: 1px solid #dde1e7; overflow-wrap: anywhere; }
+@media(max-width:380px) { .progressStats { grid-template-columns: 1fr; gap: 0; } }
+
+.assessmentTabs { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0; }
+.assessmentTabs button[aria-pressed="true"] { background: #15171a; color: #fff; }
+.movementDrill { padding: 12px 0; border-bottom: 1px solid #dde1e7; overflow-wrap: anywhere; }
+.movementDrill dd { margin: 6px 0 14px; }
+.movementDrill h4 { margin-bottom: 8px; }
