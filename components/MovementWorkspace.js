@@ -3,6 +3,7 @@ import {useEffect,useState} from 'react'
 import Link from 'next/link'
 import AppShell from './AppShell'
 import PerformanceBenchmarks from './PerformanceBenchmarks'
+import ExistingAthleteOnboarding from './ExistingAthleteOnboarding'
 import {MovementReportView,MovementReportForm,RubricManager} from './MovementReport'
 import {athleteDirectory,easternDate} from '../lib/performance.mjs'
 import {appointmentTime,appointmentDate} from '../lib/movement.mjs'
@@ -24,9 +25,9 @@ export default function MovementWorkspace({coach=false}) {
   const responses=await Promise.all([s.from('movement_rubrics').select('*').order('created_at',{ascending:false}),s.rpc('intro_coaches'),coach?s.rpc('get_coach_athletes_v2'):s.from('athletes').select('*').eq('guardian_id',user.id),s.from('assessment_tests').select('*').order('name'),s.from('assessment_templates').select('*').order('name')])
   for(const r of responses)if(r.error)throw r.error
   const [rubrics,coaches,athleteRows,tests,templates]=responses.map(r=>r.data||[])
-  const [slots,appointments,reports,results]=await Promise.all([allRows('assessment_slots','start_at'),allRows('assessment_appointments'),allRows('movement_reports'),allRows('assessment_results')])
+  const [slots,appointments,reports,results,onboardingHistory]=await Promise.all([allRows('assessment_slots','start_at'),allRows('assessment_appointments'),allRows('movement_reports'),allRows('assessment_results'),coach?allRows('onboarding_attestations','recorded_at'):Promise.resolve([])])
   const athletes=athleteDirectory(athleteRows)
-  setData({rubrics,coaches,athletes,tests,templates,slots,appointments,reports,results,userId:user.id,loadedAt:Date.now()})
+  setData({rubrics,coaches,athletes,tests,templates,slots,appointments,reports,results,onboardingHistory,userId:user.id,loadedAt:Date.now()})
   setAthlete(old=>old&&athletes.some(a=>a.id===old)?old:athletes[0]?.id||'')
   setCoachId(old=>old||coaches.find(c=>c.id===user.id)?.id||coaches[0]?.id||'')
   setRubricId(old=>rubrics.some(r=>r.id===old&&r.active)?old:rubrics.find(r=>r.active)?.id||'')
@@ -49,6 +50,10 @@ export default function MovementWorkspace({coach=false}) {
    return result
   }catch(e){setMessage(e.message||'Unable to save.');return null}finally{setBusy(false)}
  }
+ async function recordExisting(step,completed,completedOn,note){
+  if(busy||!athlete)return;setBusy(true);setMessage('')
+  try{const {error}=await supabase().rpc('record_existing_onboarding',{p_athlete_id:athlete,p_step:step,p_completed:completed,p_completed_on:completedOn,p_note:note});if(error)throw error;await load();setMessage('Onboarding updated.')}catch(e){setMessage(e.message||'Unable to update onboarding.')}finally{setBusy(false)}
+ }
  function scheduleExisting(a){const s=data.slots.find(s=>s.id===a.slot_id);setAthlete(a.athlete_id);setReschedule({...a,rubric_id:s.rubric_id});setCoachId(s.coach_id);setLocation(s.location);setDate(appointmentDate(s.start_at));setRubricId(s.rubric_id);setView('schedule');setEditing(null)}
  function editReport(a){setAthlete(a.athlete_id);const slot=data.slots.find(s=>s.id===a.slot_id);setEditing({appointment:a,slot,rubric:data.rubrics.find(r=>r.id===slot.rubric_id),report:data.reports.find(r=>r.appointment_id===a.id)});setView('assessment')}
  async function revisions(report){const {data:rows,error}=await supabase().from('movement_report_revisions').select('*').eq('report_id',report.id).order('revision',{ascending:false});if(error)setMessage(error.message);else setAudit({id:report.id,rows})}
@@ -60,6 +65,7 @@ export default function MovementWorkspace({coach=false}) {
    <label>Athlete<select value={athlete} onChange={e=>{setAthlete(e.target.value);setReschedule(null);setEditing(null);setAudit(null)}}><option value="">Choose athlete</option>{data.athletes.map(a=><option key={a.id} value={a.id}>{a.first_name} {a.last_name||''}</option>)}</select></label>
    {!data.athletes.length&&<p>Add an athlete profile before scheduling or recording results.</p>}
    <nav className="assessmentTabs" aria-label="Athlete Hub sections">{[['schedule','Schedule Assessment'],['assessment','Athlete Assessment'],['progress','Athlete Progress'],...(coach?[['templates','Manage Templates']]:[])].map(([key,label])=><button key={key} type="button" aria-pressed={view===key} onClick={()=>{setView(key);if(key!=='schedule')setReschedule(null)}}>{label}</button>)}</nav>
+   {coach&&athlete&&status&&<ExistingAthleteOnboarding key={athlete} status={status} history={data.onboardingHistory.filter(r=>r.guardian_id===guardian&&(r.step==='intro'||r.athlete_id===athlete))} busy={busy} onSave={recordExisting}/>}
    {!coach&&status&&<section className="notice"><b>Your athlete’s next step</b><p>{!status.waiver_signed?<Link href="/waiver">Sign the participation waiver</Link>:!status.intro_completed?<Link href="/intro">Schedule your intro call, then your coach will mark it completed</Link>:!status.movement_completed?'Schedule an Initial Movement Assessment or view your upcoming appointment.':'View Athlete Assessment for movement observations and Athlete Progress for performance benchmarks.'}</p></section>}
    {view==='schedule'&&<section className="card"><h2>Schedule Assessment</h2><p>Initial Movement Assessment · 45 minutes</p>
     {!eligible&&<p>{!status?'Checking onboarding…':!status.waiver_signed?'The parent must sign the participation waiver before scheduling.':'Your coach must mark the intro call completed before an assessment can be scheduled.'}</p>}
@@ -73,7 +79,8 @@ export default function MovementWorkspace({coach=false}) {
     {coach&&<p><Link href="/coach/intro">Manage vacation, sick-day and other blocked times</Link></p>}
    </section>}
    {(view==='assessment'||view==='schedule')&&<section className="card"><h2>{coach?'Assessment appointments':'Athlete Assessment'}</h2>
-    {!appointments.length&&<p>No assessments scheduled yet.</p>}
+    {status?.assessment_previously_completed&&<p>Your coach has recorded the Initial Movement Assessment as previously completed. View Athlete Progress for ongoing performance results.</p>}
+    {!appointments.length&&!status?.assessment_previously_completed&&<p>No assessments scheduled yet.</p>}
     {appointments.map(a=>{const slot=data.slots.find(s=>s.id===a.slot_id);if(!slot)return null;const movement=Boolean(slot.rubric_id),report=data.reports.find(r=>r.appointment_id===a.id),name=data.athletes.find(x=>x.id===a.athlete_id);return <article className="card compact" key={a.id}>
      <h3>{name?.first_name} {name?.last_name||''}</h3><p>{movement?'Initial Movement Assessment':'Earlier performance appointment'} · {appointmentTime(slot.start_at)} · {slot.location} · {a.status.replace('_','-')}</p>
      {a.rescheduled_from&&<p>Rescheduled appointment</p>}

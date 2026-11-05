@@ -62,7 +62,7 @@ export default function Intro() {
     <p>Let’s kickstart their journey to success together!</p>
     <p role="status">{msg}</p>
     {!ready?<p>Loading…</p>:!signedIn?<Link href="/login">Sign in to schedule your call →</Link>:<>
-      {!onboarding?.waiver_signed?<p><Link href="/waiver">Sign the participation waiver</Link> before scheduling your intro call.</p>:onboarding?.intro_completed&&!upcomingCall?<div className="card"><h2>Intro call completed</h2><p>You can now <Link href="/assessments">Schedule Assessment</Link>.</p></div>:pendingCompletion?<div className="card"><h2>Intro call awaiting coach completion</h2><p>Your call is recorded. Once your coach marks it completed, Schedule Assessment will be available here.</p></div>:upcomingCall ? <div className="card" role="status">
+      {!onboarding?.waiver_signed?<p><Link href="/waiver">Sign the participation waiver</Link> before scheduling your intro call.</p>:onboarding?.intro_completed&&!upcomingCall?<div className="card"><h2>Intro call completed</h2><p><Link href="/assessments">{onboarding?.movement_completed?'View Athlete Assessment and Athlete Progress':'Schedule Assessment'}</Link>.</p></div>:pendingCompletion?<div className="card"><h2>Intro call awaiting coach completion</h2><p>Your call is recorded. Once your coach marks it completed, Schedule Assessment will be available here.</p></div>:upcomingCall ? <div className="card" role="status">
         <h2>You’re booked!</h2>
         <p>Your introduction call with {coaches.find(c=>c.id===upcomingCall.coach_id)?.full_name||'Coach Chavis'} is confirmed.</p>
         <p><strong>{easternTime(upcomingCall.start_at)}</strong></p>

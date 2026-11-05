@@ -24,3 +24,11 @@ test('performance view renders benchmarks and graph separately with first measur
  for(const word of ['Athlete Progress','Performance Benchmarks','Progress over time','Lower is faster','Personal best'])assert.ok(html.includes(word),word)
  assert.ok(!html.includes('Overall observations'));assert.ok(!html.includes('2.5 / 5'))
 })
+
+const Existing=loadComponent(new URL('../components/ExistingAthleteOnboarding.js',import.meta.url).pathname).default
+test('coach controls clearly scope prior completion and preserve undo history',()=>{
+ const html=renderToStaticMarkup(createElement(Existing,{status:{intro_completed:false,movement_completed:false},busy:false,onSave:()=>{}}))
+ for(const text of ['Mark intro call previously completed','Mark assessment previously completed','whole family','selected athlete','No appointment or test scores','Previous completion date'])assert.ok(html.includes(text),text)
+ const completed=renderToStaticMarkup(createElement(Existing,{status:{intro_completed:true,movement_completed:true,intro_previously_completed:true,assessment_previously_completed:true},busy:false,onSave:()=>{},history:[{id:1,step:'assessment',completed:true,completed_on:'2026-01-01',recorded_at:'2026-11-04T15:00:00Z',note:'Training before app'}]}))
+ assert.ok(completed.includes('Undo previous assessment completion'));assert.ok(completed.includes('Training before app'));assert.ok(!completed.includes('Mark assessment previously completed'))
+})

@@ -2,7 +2,8 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "git": {
     "deploymentEnabled": {
-      "feature/movement-assessment-onboarding": false
+      "feature/movement-assessment-onboarding": false,
+      "feature/existing-athlete-onboarding": false
     }
   }
 }
