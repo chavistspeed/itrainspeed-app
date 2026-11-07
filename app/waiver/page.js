@@ -4,12 +4,14 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import AppShell from '../../components/AppShell'
+import { enrollmentReturn } from '../../lib/enrollment.mjs'
 import { supabase } from '../../lib/supabase'
 
 const WAIVER_VERSION = '2026-01'
 
 export default function WaiverPage() {
   const router = useRouter()
+  const [returnPath, setReturnPath] = useState('/dashboard')
 
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -25,6 +27,7 @@ export default function WaiverPage() {
   const [errorMsg, setErrorMsg] = useState('')
 
   useEffect(() => {
+    setReturnPath(enrollmentReturn(window.location.search))
     load()
   }, [])
 
@@ -32,7 +35,7 @@ export default function WaiverPage() {
     const s = supabase()
 
     if (!s) {
-      router.replace('/login')
+      router.replace(`/login?${new URLSearchParams({ next: enrollmentReturn(window.location.search) })}`)
       return
     }
 
@@ -41,7 +44,7 @@ export default function WaiverPage() {
     } = await s.auth.getUser()
 
     if (!user) {
-      router.replace('/login')
+      router.replace(`/login?${new URLSearchParams({ next: enrollmentReturn(window.location.search) })}`)
       return
     }
 
@@ -148,7 +151,7 @@ export default function WaiverPage() {
     } = await s.auth.getUser()
 
     if (!user) {
-      router.replace('/login')
+      router.replace(`/login?${new URLSearchParams({ next: enrollmentReturn(window.location.search) })}`)
       return
     }
 
@@ -239,6 +242,7 @@ export default function WaiverPage() {
         )}
 
         <section>
+          <Link className="ctaLink" href={returnPath}>Continue to training</Link>
           <div className="card">
 
             <h2>

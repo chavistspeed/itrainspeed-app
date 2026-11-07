@@ -1,10 +1,13 @@
 'use client'
 
+import Link from 'next/link'
+import { enrollmentReturn } from '../../lib/enrollment.mjs'
 import { useEffect, useState } from 'react'
 import AppShell from '../../components/AppShell'
 import { supabase } from '../../lib/supabase'
 
 export default function Athletes() {
+  const [returnPath, setReturnPath] = useState('')
   const [list, setList] = useState([])
 
   const [f, setF] = useState({
@@ -32,6 +35,7 @@ export default function Athletes() {
   }
 
   useEffect(() => {
+    setReturnPath(enrollmentReturn(window.location.search, ''))
     load()
   }, [])
 
@@ -150,6 +154,7 @@ export default function Athletes() {
         Athlete profiles
       </h1>
 
+      {returnPath && <p><Link className="ctaLink" href={returnPath}>Continue to Off-Season Track</Link></p>}
       <div className="grid2">
         <section className="card">
           <h2>

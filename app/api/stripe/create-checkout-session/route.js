@@ -1,3 +1,4 @@
+import { checkoutReturnPaths, isOffSeasonTrack } from '../../../../lib/enrollment.mjs'
 import Stripe from 'stripe'
 import { createClient } from '@supabase/supabase-js'
 
@@ -434,7 +435,7 @@ export async function POST(request) {
       error: profileError,
     } = await supabaseAdmin
       .from('profiles')
-      .select('stripe_customer_id')
+      .select('stripe_customer_id,waiver_accepted_at,waiver_version')
       .eq('id', user.id)
       .single()
 
@@ -442,6 +443,14 @@ export async function POST(request) {
       console.error(
         'Unable to load Stripe customer profile:',
         profileError
+      )
+    }
+
+    if (body.enrollment === 'off-season-track' && isOffSeasonTrack(packageData) &&
+        (profileError || !profile?.waiver_accepted_at || profile.waiver_version !== '2026-01')) {
+      return Response.json(
+        { error: 'Please complete the current participation waiver before enrolling.', code: 'WAIVER_REQUIRED' },
+        { status: 403 }
       )
     }
 
@@ -564,6 +573,8 @@ export async function POST(request) {
       }
     }
 
+    const returnPaths = checkoutReturnPaths(packageData, body.enrollment, entitlementAthleteId)
+
     const checkoutSession =
       await stripe.checkout.sessions.create({
         mode:
@@ -612,10 +623,10 @@ export async function POST(request) {
             }),
 
         success_url:
-          `${origin}/plans?checkout=success&session_id={CHECKOUT_SESSION_ID}`,
+          `${origin}${returnPaths.success}&session_id={CHECKOUT_SESSION_ID}`,
 
         cancel_url:
-          `${origin}/plans?checkout=cancelled`,
+          `${origin}${returnPaths.cancel}`,
       })
 
     return Response.json({
