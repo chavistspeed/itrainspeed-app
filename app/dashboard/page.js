@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import AppShell from '../../components/AppShell'
+import OnboardingCard from '../../components/OnboardingCard'
 import { supabase } from '../../lib/supabase'
 
 const CANCELLATION_WINDOW_HOURS = 6
@@ -445,6 +446,7 @@ async function cancel(
 
   return (
     <AppShell title="Athlete Hub">
+      <OnboardingCard/>
 
       <section className="hero">
         <p>

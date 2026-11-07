@@ -11,6 +11,7 @@ class FakeStripe {
 }
 function createClient() {
   return {
+    rpc: async () => ({ data: state.approved, error: state.approvalError ? { message: 'approval lookup failed' } : null }),
     auth: { getUser: async () => ({ data: { user: state.authenticated ? { id: 'guardian-1', email: 'parent@example.test' } : null } }) },
     from(table) {
       const filters = {}
@@ -33,7 +34,7 @@ const { POST } = await import('../app/api/stripe/create-checkout-session/route.j
 process.env.STRIPE_SECRET_KEY = 'sk_test_fake'
 process.env.SUPABASE_SERVICE_ROLE_KEY = 'test-service-key'
 process.env.NEXT_PUBLIC_SUPABASE_URL = 'https://example.supabase.co'
-function reset() { state = { authenticated: true, owned: true, waiver: true, pkg, entitlements: [], createdCustomers: 0 } }
+function reset() { state = { authenticated: true, approved: true, owned: true, waiver: true, pkg, entitlements: [], createdCustomers: 0 } }
 function request(body = {}, authorized = true) {
   return new Request('https://app.example/api/stripe/create-checkout-session', { method: 'POST', headers: { 'Content-Type': 'application/json', origin: 'https://app.example', ...(authorized ? { authorization: 'Bearer test-token' } : {}) }, body: JSON.stringify({ package_id: pkg.id, athlete_id: 'athlete-1', enrollment: 'off-season-track', ...body }) })
 }
@@ -72,4 +73,16 @@ test('active membership including pending cancellation blocks duplicate checkout
 test('membership lookup failures and missing waiver block enrollment', async () => {
   reset(); state.lookupError = true; assert.equal((await POST(request())).status, 500); assert.equal(state.checkout, undefined)
   reset(); state.waiver = false; const response = await POST(request()); assert.equal(response.status, 403); assert.equal((await response.json()).code, 'WAIVER_REQUIRED'); assert.equal(state.checkout, undefined)
+})
+
+
+test('live coach approval gate remains enforced without Stripe side effects', async () => {
+  reset(); state.approved = false
+  const response = await POST(request())
+  assert.equal(response.status, 403)
+  assert.equal((await response.json()).code, 'COACH_APPROVAL_REQUIRED')
+  assert.equal(state.checkout, undefined)
+  reset(); state.approvalError = true
+  assert.equal((await POST(request())).status, 503)
+  assert.equal(state.checkout, undefined)
 })

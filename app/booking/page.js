@@ -12,6 +12,7 @@ import {
 } from 'next/navigation'
 import Link from 'next/link'
 import AppShell from '../../components/AppShell'
+import TrainingGate from '../../components/TrainingGate'
 import { supabase } from '../../lib/supabase'
 
 const CURRENT_WAIVER_VERSION = '2026-01'
@@ -935,7 +936,7 @@ export default function Booking() {
         </AppShell>
       }
     >
-      <BookingContent />
+      <TrainingGate><BookingContent /></TrainingGate>
     </Suspense>
   )
 }

@@ -40,12 +40,13 @@ function Enrollment() {
           s.from('athletes').select('*').eq('guardian_id', user.id).order('first_name'),
           s.from('entitlements').select('*').eq('guardian_id', user.id).eq('status', 'active'),
           s.from('profiles').select('id,full_name,waiver_accepted_at,waiver_version').eq('id', user.id).single(),
+          s.rpc('training_approved', { p_guardian_id: user.id }),
         ])
         if (results.some((result) => result.error)) throw new Error('We could not verify your program, profile, and membership. Please retry before purchasing.')
-        const [packages, athletes, entitlements, profile] = results.map((result) => result.data)
+        const [packages, athletes, entitlements, profile, approved] = results.map((result) => result.data)
         const matches = packages.filter(isOffSeasonTrack)
         if (cancelled) return
-        setData({ pkg: matches.length === 1 ? matches[0] : null, athletes, entitlements, profile })
+        setData({ pkg: matches.length === 1 ? matches[0] : null, athletes, entitlements, profile, approved: approved === true })
         setAthleteId((current) => athletes.some((a) => a.id === current) ? current : athletes.length === 1 ? athletes[0].id : '')
         setError('')
       } catch (err) {
@@ -66,7 +67,7 @@ function Enrollment() {
   }, [checkout, membership?.id])
 
   async function purchase() {
-    if (busy || error || !data?.pkg || !athleteId || membership || !waiverComplete || checkout === 'success') return
+    if (busy || error || !data?.pkg || !athleteId || membership || !waiverComplete || !data.approved || checkout === 'success') return
     setBusy(true)
     setError('')
     try {
@@ -114,11 +115,12 @@ function Enrollment() {
         {membership ? <>
           <p>This athlete already has this membership. No additional purchase is needed.</p>
           {membership.cancel_at_period_end && <p>Cancellation is scheduled. Access continues until the membership expires.</p>}
-          {waiverComplete && <Link className="ctaLink" href={bookingUrl(membership)}>Book Track Training</Link>}
+          {waiverComplete && data.approved && <Link className="ctaLink" href={bookingUrl(membership)}>Book Track Training</Link>}
         </> : checkout === 'success' ? <p role="status">{waiting ? 'Checking for your membership activation...' : 'Your membership is not active yet. Refresh membership status or contact support before trying another payment.'}</p> : <>
           {checkout === 'cancelled' && <p>Checkout was cancelled. Enrollment has not been completed.</p>}
-          <button onClick={purchase} disabled={busy || !athleteId || !waiverComplete || Boolean(error)}>{busy ? 'Opening checkout...' : 'Enroll selected athlete'}</button>
+          <button onClick={purchase} disabled={busy || !athleteId || !waiverComplete || !data.approved || Boolean(error)}>{busy ? 'Opening checkout...' : 'Enroll selected athlete'}</button>
         </>}
+        {!data.approved && <p>Your coach needs to confirm your returning-family training access. Contact iTrainSpeed for approval; you do not need to book a new intro call or assessment through this link.</p>}
         {!waiverComplete && <p>Complete the required participation waiver before continuing. <Link href={`/waiver?${new URLSearchParams({ next: returnPath })}`}>Review and sign waiver</Link></p>}
         <button className="secondary" disabled={busy} onClick={() => setRefresh((value) => value + 1)}>Refresh membership status</button>
       </article> : <p className="notice">This program is currently unavailable. Contact iTrainSpeed for help.</p>}

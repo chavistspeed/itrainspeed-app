@@ -335,9 +335,9 @@ export default function WaiverPage() {
 
         <Link
           className="biglink"
-          href="/dashboard"
+          href="/intro"
         >
-          Return to Athlete Hub →
+          Schedule your intro call →
         </Link>
 
       </AppShell>

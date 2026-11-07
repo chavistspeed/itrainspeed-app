@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
 import { Suspense } from 'react'
 import AppShell from '../../components/AppShell'
+import TrainingGate from '../../components/TrainingGate'
 import { supabase } from '../../lib/supabase'
 
 const money = (c) =>
@@ -835,7 +836,7 @@ export default function Plans() {
         </AppShell>
       }
     >
-      <PlansContent />
+      <TrainingGate><PlansContent /></TrainingGate>
     </Suspense>
   )
 }

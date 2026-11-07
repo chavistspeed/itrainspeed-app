@@ -80,6 +80,13 @@ export async function POST(request) {
       )
     }
 
+    // Fail closed before creating any Stripe customer or checkout session.
+    const { data: approved, error: approvalError } = await supabaseAdmin.rpc(
+      'training_approved', { p_guardian_id: user.id }
+    )
+    if (approvalError) return Response.json({ error: 'Unable to verify coach approval.' }, { status: 503 })
+    if (approved !== true) return Response.json({ error: 'Coach approval is required before purchasing training.', code: 'COACH_APPROVAL_REQUIRED' }, { status: 403 })
+
     const body =
       await request.json()
 

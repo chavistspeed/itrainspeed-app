@@ -1,10 +1,20 @@
 # Direct Off-Season Track enrollment
 
+## Production compatibility correction — November 7, 2026
+
+Signed-in Vercel browser inspection confirmed the active production deployment is `dpl_8CJRQ7vvAbFcrYu9ekhtrsc3Fxj6`, sourced from `feature/existing-athlete-onboarding` with CLI commit `f14c3635086019cf06ba24d54b5cbb143e07294c`. That CLI commit is not available through GitHub. The corresponding GitHub source branch is `f226109d36aa372fb1848ab46f948181ab8d9b6a`. The production source viewer confirms TrainingGate and the newer coach approval, onboarding, and assessment components exist; main did not contain these features.
+
+The original enrollment preview based on main must not be released. The corrected preview incorporates the existing-athlete-onboarding source branch, retains all its UI/API/database source and locked dependencies, and checks the existing training_approved RPC before enrollment. No SQL was applied or production data changed. New approval-negative tests ensure unapproved families cannot enter Stripe or be falsely told to repeat an intro call.
+
+Corrected validation: 118 combined tests pass sequentially, including isolated PostgreSQL/PGlite contract and concurrency tests; the production build passes; all 9 mocked browser scenarios pass, including waiver signing and an unapproved returning family. Actual customer login, real Stripe test-mode webhook fulfillment, and an exact full-source comparison with the CLI deployment remain release verification items. The visible hosted preview reached the app's login page with the enrollment destination retained. Vercel connector authorization still fails, but signed-in browser inspection is available.
+
+This correction supersedes the original assumption below that main represented production. The first preview had 14 generated pages; the corrected build retains 18, including the assessment and intro tools. No new database migration is required for the enrollment feature; the included upstream SQL files are already-deployed source history and must not be replayed.
+
 ## Scope
 
 The new `/enroll/off-season-track` page resolves exactly one existing `Off-Season Track & Field` membership from the catalog. Pricing and recurrence come from that record; the seeded price is $175. It never substitutes a different plan. Parents log in with a safe return to the program, select an owned athlete, complete the current waiver if needed, and use the existing Stripe checkout and webhook. Active membership detection is scoped to the athlete and package, including memberships with cancellation scheduled for the future. Eligible sessions are booked through the existing booking page and `book_session_v15`.
 
-No database migration, Stripe product change, intro-call bypass flag, assessment status change, or deployment setting change is included. The current root application has no intro-call or assessment gate in this path. Existing profile lookup, athlete ownership checks, waiver signing, server booking checks, notifications, and other plan checkouts remain in place. The root code currently collects athlete age and parent name/email; this change does not introduce the separate phone/birthdate registration work discussed in the older chat.
+No new database migration, Stripe product change, intro-call bypass flag, assessment status change, or deployment setting change is included. The production application requires coach approval through training_approved; that gate remains enforced in checkout, booking, and the enrollment page. Approved returning families do not need another intro call or assessment. An unapproved returning family is told to contact the coach, rather than being sent to book a new intro call. Existing profile lookup, athlete ownership checks, waiver signing, server booking checks, notifications, and other plan checkouts remain in place. The existing source collects athlete age and parent name/email; this change does not introduce the separate phone/birthdate registration work discussed in the older chat.
 
 Checkout returns do not grant access. The page polls for the existing webhook's entitlement for up to 60 seconds, then offers manual refresh and support. A success return never offers a second purchase while activation is pending. Existing server checks prevent buying the same active membership. Existing behavior does not serialize simultaneous checkout attempts before either payment has completed; this change does not add a new payment reservation system.
 
@@ -32,11 +42,11 @@ NEXT_PUBLIC_SUPABASE_URL=https://enrollment-test.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=test-anon-key
 ```
 
-Start the production build at `http://127.0.0.1:3100`, then run `node tests/enrollment.browser.mjs`. If using an existing Chrome installation, set `CHROME_EXECUTABLE` to its executable path. The tests intercept the fake Supabase host and payment requests; never point this mocked suite at production. `TEST_BASE_URL` can select a different local port. The existing dependency ranges remain unchanged; no package-manager lockfile was added because that could change Vercel's install manager. Local checks resolved Next 15.5.29, React/React DOM 19.3.1, Supabase SSR 0.7.0, Supabase JS 2.119.0, Stripe 18.5.0, Nodemailer 7.0.13.
+Start the production build at `http://127.0.0.1:3100`, then run `node tests/enrollment.browser.mjs`. If using an existing Chrome installation, set `CHROME_EXECUTABLE` to its executable path. The tests intercept the fake Supabase host and payment requests; never point this mocked suite at production. `TEST_BASE_URL` can select a different local port. The production source branch's dependency versions, pnpm lockfile, workspace configuration, and test dependencies are preserved. The corrected build uses Next 15.5.28 and Supabase JS 2.118.0 from that lockfile.
 
 ## Approval and release steps
 
-The feature is on local branch `codex/off-season-direct-enrollment`. It has not been pushed, merged, or deployed. Pushing may automatically create a Vercel preview, so it is intentionally pending deployment approval.
+The owner approved publishing branch `codex/off-season-direct-enrollment` and creating previews only. Draft PR #1 is open. No production release or merge has been approved. The first preview was published from main; the correction below aligns it with the source branch already deployed in production.
 
 1. Review the patch and this report. Approve **publishing the branch and creating a preview deployment**. This does not approve merging or production release.
 2. Restore Vercel access to the itrainspeed team/project, inspect the actual project root, production branch, deployment commit, domain, and preview payment/database settings. Confirm the current catalog has exactly one correctly named Track membership, price 17500 cents, correct monthly/one-time behavior, and active status. No settings or live records should be changed without approval.

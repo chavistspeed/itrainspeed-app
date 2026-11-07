@@ -37,6 +37,7 @@ export default function Nav() {
   }
 
   const items = [
+    { href: '/intro', label: 'Intro Call' },
     {
       href: '/dashboard',
       label: 'Home',
@@ -46,8 +47,8 @@ export default function Nav() {
       label: 'Book',
     },
     {
-      href: '/athletes',
-      label: 'Athletes',
+      href: '/assessments',
+      label: 'Athlete Hub',
     },
     {
       href: '/plans',

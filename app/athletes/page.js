@@ -149,6 +149,7 @@ export default function Athletes() {
 
   return (
     <AppShell title="Athletes">
+      <p><a href="/assessments">Open Athlete Hub</a></p>
       <h1>
         Athlete profiles
       </h1>

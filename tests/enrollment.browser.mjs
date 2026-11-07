@@ -20,7 +20,8 @@ async function scenario(name, options, run){
  await page.route('https://enrollment-test.supabase.co/**',async route=>{
   const url=new URL(route.request().url()); const table=url.pathname.split('/').pop()
   let response
-  if(url.pathname.includes('/auth/v1/token')) response=session
+  if(table==='training_approved') response=options.approved!==false
+  else if(url.pathname.includes('/auth/v1/token')) response=session
   else if(url.pathname.includes('/auth/v1/user')) response=user
   else if(table==='packages') response=options.unavailable?[]:[pkg]
   else if(table==='athletes') response=options.noAthletes?[]:athletes
@@ -62,5 +63,6 @@ await scenario('cancelled checkout retains athlete and allows retry',{},async({p
 await scenario('no athlete links to existing profile flow',{noAthletes:true},async({page})=>{await page.goto(base+path);await page.getByRole('link',{name:'Add athlete',exact:true}).click();await page.getByRole('link',{name:'Continue to Off-Season Track'}).waitFor()})
 await scenario('unavailable catalog does not substitute another plan',{unavailable:true},async({page})=>{await page.goto(base+path);await page.getByText('This program is currently unavailable.',{exact:false}).waitFor();assert.equal(await page.getByRole('button',{name:'Enroll selected athlete'}).count(),0)})
 await scenario('membership lookup error blocks purchase',{failLookup:true},async({page})=>{await page.goto(base+path);await page.getByRole('alert').waitFor();assert.equal(await page.getByRole('button',{name:'Enroll selected athlete'}).count(),0)})
+await scenario('unapproved returning families contact coach without repeating intro',{approved:false},async({page})=>{await page.goto(base+path+'?athlete=athlete-1');await page.getByText('Your coach needs to confirm your returning-family training access.',{exact:false}).waitFor();assert.ok(await page.getByRole('button',{name:'Enroll selected athlete'}).isDisabled());assert.equal(await page.getByRole('link',{name:'Schedule an intro call'}).count(),0)})
 console.log(`${passed} browser scenarios passed`)
 }finally{await browser.close()}
