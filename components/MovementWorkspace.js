@@ -60,6 +60,7 @@ export default function MovementWorkspace({coach=false}) {
  const appointments=data?.appointments.filter(a=>a.athlete_id===athlete)||[]
  return <AppShell title={coach?'Coach Control Center':'Athlete Hub'}><h1>{coach?'Assessments & Athlete Progress':'Athlete Hub'}</h1>
   <p><Link href={coach?'/coach':'/athletes'}>{coach?'Back to Coach Control Center':'Manage athlete profiles'}</Link></p>
+  <p><Link className="miniCta" href={`${coach?'/coach':''}/assessment-reports${athlete?'?athlete='+encodeURIComponent(athlete):''}`}>{coach?'Upload assessment results & videos':'View assessment results & videos'}</Link></p>
   <p role="status" aria-live="polite">{message}</p>
   {!data?<p>{message?<Link href="/login">Sign in</Link>:'Loading…'}</p>:<>
    <label>Athlete<select value={athlete} onChange={e=>{setAthlete(e.target.value);setReschedule(null);setEditing(null);setAudit(null)}}><option value="">Choose athlete</option>{data.athletes.map(a=><option key={a.id} value={a.id}>{a.first_name} {a.last_name||''}</option>)}</select></label>
