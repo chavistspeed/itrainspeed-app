@@ -836,6 +836,8 @@ export default function Coach() {
             Schedule
           </button>
 
+          <Link className="tab" href="/coach/assessment-reports">Results &amp; Videos</Link>
+
           <button
             className={
               tab === 'athletes'

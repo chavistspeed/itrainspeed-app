@@ -1022,3 +1022,15 @@ select {
 .movementDrill { padding: 12px 0; border-bottom: 1px solid #dde1e7; overflow-wrap: anywhere; }
 .movementDrill dd { margin: 6px 0 14px; }
 .movementDrill h4 { margin-bottom: 8px; }
+/* Assessment reports: readable tables, touch-friendly forms and video attachments. */
+.assessmentFields { border: 0; padding: 0; margin: 0; min-width: 0; }
+.assessmentMetric { display: grid; grid-template-columns: 2fr 1fr 1fr auto; gap: 12px; align-items: end; margin-bottom: 12px; }
+.assessmentTable { overflow: auto; max-height: 480px; margin: 12px 0; border: 1px solid #555; border-radius: 8px; }
+.assessmentTable table { width: 100%; border-collapse: collapse; text-align: left; }
+.assessmentTable th, .assessmentTable td { padding: 10px 14px; border-bottom: 1px solid #555; white-space: pre-wrap; min-width: 90px; }
+.assessmentTable th { background: #202124; color: #fff; }
+.assessmentText { white-space: pre-wrap; overflow-wrap: anywhere; }
+.assessmentReport { margin: 20px 0; min-width: 0; }
+.assessmentReport section { margin: 18px 0; }
+.assessmentReport h2, .assessmentReport h3, .assessmentReport a { overflow-wrap: anywhere; }
+@media (max-width: 640px) { .assessmentMetric { grid-template-columns: 1fr 1fr; } .assessmentMetric label:first-child { grid-column: 1 / -1; } }

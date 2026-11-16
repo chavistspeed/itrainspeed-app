@@ -536,6 +536,12 @@ async function cancel(
       </section>
 
 
+      <section className="card">
+        <h2>Assessment Results &amp; Videos</h2>
+        <p>View your child’s shared assessment reports, spreadsheets, videos, and coaching feedback.</p>
+        <Link className="miniCta" href="/assessment-reports">View assessment reports</Link>
+      </section>
+
       {msg && (
         <div className="notice">
           {msg}
